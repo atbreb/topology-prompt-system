@@ -168,6 +168,18 @@ Autonomy is **strict by default**: every proposed decision pauses for you, and c
 amendments always pause regardless of posture. Delegation to a secondary agent and parallel
 subagent dispatch are *optional* — if you install solo, all of that prose compiles out cleanly.
 
+### Topology — implementation helpers
+
+The execution layer that `topology-implement` and `topology-phase-plan` delegate to. You rarely
+invoke these directly, but the lifecycle depends on them.
+
+```
+project-prep-scaffolding   Scaffold a phase's implementation directory (session prompts + runbooks)
+project-next-phase         Execute the next implementation phase against the scaffolded plan
+project-verify             Formal per-phase verification (advisory checks → Proposed findings)
+project-promote            Promote a completed implementation's findings to the doc layer
+```
+
 ### Compass — strategic cadence
 
 ```
@@ -194,7 +206,7 @@ topology-prompt-system/
 │   ├── topology-install.md        ← the initiation prompt (scan + interview + compile)
 │   └── topology-update.md         ← the update engine (recompile + one-time semantic updates)
 ├── templates/
-│   ├── commands/                  ← the 26 abstract topology commands (+ topology-PRINCIPLES)
+│   ├── commands/                  ← 26 topology commands + 4 project-* execution helpers (+ topology-PRINCIPLES)
 │   ├── protocols/                 ← autonomy + dispatch protocol templates
 │   └── skeletons/                 ← empty seeded global + project-foundation doc templates
 ├── profile/
