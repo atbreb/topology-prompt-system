@@ -1,0 +1,70 @@
+# Example profile — a filled-in instance for a solo TypeScript/Node project.
+# topology-install generates this for you from a scan + interview; this is here so you can see
+# the shape and hand-edit if you prefer. After editing, run `topology-update` to recompile.
+
+system_version: "1.0.0"
+compiled_at: "2026-05-21T00:00:00Z"
+applied_updates: []
+
+paths:
+  docs_root: docs
+  commands_dir: .claude/commands
+  code_root: .
+  apps_dir: src
+  tier_enabled: true
+  # tier labels + all projects_*/compass_dir/scratch_dir paths derive from docs_root.
+
+stack:
+  primary_language: TypeScript
+  languages: [TypeScript]
+  backend_stack: "Node.js + Fastify"
+  frontend_stack: "React + Vite"
+  package_manager: pnpm
+  test_command: "pnpm test"
+  test_command_unit: "pnpm test"
+  test_command_e2e: "pnpm test:e2e"     # non-empty ⇒ {HAS_E2E} true
+  lint_command: "pnpm lint"
+  build_command: "pnpm build"
+  typecheck_command: "pnpm typecheck"
+  codegen_command: ""                     # empty ⇒ {HAS_CODEGEN} false
+  api_style: rest
+  database: PostgreSQL
+  deploy_platform: "Fly.io"
+  secrets_tool: "dotenv"
+  commit_convention: conventional
+  branch_prefix: "topology/"
+  push_policy: per-category
+
+identity:
+  project_name: Acme
+  apps:
+    - { name: api,    path: src/api,    role: "backend service" }
+    - { name: web,    path: src/web,    role: "customer web app" }
+    - { name: worker, path: src/worker, role: "async job runner" }
+  example_project_slug: billing-rebuild
+
+agents:
+  multi_agent: false            # solo Claude ⇒ all delegate/pair-mode blocks compile out
+  delegate_agent_name: ""
+  delegate_flag: "--delegate"
+  delegate_invoke: ""
+  delegate_protocol_file: ""
+  use_subagents: true
+  subagent_types: [general-purpose]
+  autonomy_default: strict
+  memory_enabled: false         # solo user with no persistent memory store
+  memory_dir: ""
+
+compass:
+  enabled: true
+  team_model: solo
+  roles: [general]
+  milestone_model: none
+  primary_milestone: ""
+  cadence:
+    brief_day: Monday
+    check_days: "Tue/Wed"
+    update_day: Friday
+    risk_day: Sunday
+    sprint_window: "Mon–Wed"
+    lighter_window: "Thu–Sun"

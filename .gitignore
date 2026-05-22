@@ -1,0 +1,9 @@
+# macOS
+.DS_Store
+
+# Local scratch / test-compile output (compiling the system into a sandbox to verify it)
+/.sandbox/
+/tmp/
+
+# This repo is the *abstract source*. A consuming project's molded output lives in THAT project's
+# .topology/ and .claude/commands/ — never here.
