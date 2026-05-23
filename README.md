@@ -164,9 +164,19 @@ topology-patch / topology-merge / topology-dispatch           Surgical fixes, wo
 topology-doc-walk / topology-next                             Batch-walk docs, pick the next move
 ```
 
-Autonomy is **strict by default**: every proposed decision pauses for you, and contract/seam
-amendments always pause regardless of posture. Delegation to a secondary agent and parallel
-subagent dispatch are *optional* — if you install solo, all of that prose compiles out cleanly.
+The system molds itself along two **independent** axes:
+
+- **Autonomy** — how much the agent *does* without you. Strict by default: every proposed decision
+  pauses for you, and contract/seam amendments always pause regardless of posture. (`strict` /
+  `balanced` / `autopilot`.)
+- **Teaching stance** — how much the agent *explains* while it works. Always on; orthogonal to
+  autonomy. `student` (lessons by default, dial down on request) / `curious` (flags learnable
+  moments, you pick what to go deep on) / `quiet-pro` (silent unless it infers you've hit a snag).
+  Spec: `templates/protocols/TEACHING-STANCE-PROTOCOL.md`.
+
+Delegation to a secondary agent is *optional* — install solo and all of that prose compiles out
+cleanly. Parallel **subagent dispatch is auto-adopted**: if your project already defines
+`.claude/agents/*.md`, the installer wires them in with no question (ask-by-exception only).
 
 ### Topology — implementation helpers
 

@@ -241,6 +241,11 @@ Before entering plan mode (Step 3), confirm — explicitly, by listing what was 
    phase-N/PHASE-N-SESSION-PROMPT.md
    {PROJECTS_ACTIVE_DIR}/<project>/categories/<slug>/implementation/
    phase-N/PHASE-N-RUNBOOK.md
+
+7. Active teaching stance — session override if set, else profile
+   `agents.teaching_stance` (`{TEACHING_STANCE}` for this project)
+   — selects the teaching surface per TEACHING-STANCE-PROTOCOL.md; additive
+     output only, never gates or alters implementation
 ```
 
 **Output the loadout report** in chat before proceeding to Step 3. Format:
@@ -256,6 +261,7 @@ Phase <N> of <category> — pre-flight loaded:
 - [✓] VERIFICATION-TABLE.md (row: <slug>; seam cols: S<N>, S<N>)
 - [✓] phase-N/PHASE-N-SESSION-PROMPT.md
 - [✓] phase-N/PHASE-N-RUNBOOK.md
+- [✓] teaching stance: {TEACHING_STANCE} (per TEACHING-STANCE-PROTOCOL.md)
 
 Loadout complete. Proceeding to plan mode.
 ```

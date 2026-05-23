@@ -49,9 +49,10 @@ agents:
   delegate_flag: "--delegate"
   delegate_invoke: ""
   delegate_protocol_file: ""
-  use_subagents: true
-  subagent_types: [general-purpose]
-  autonomy_default: strict
+  use_subagents: true           # auto-true when .claude/agents/*.md exist
+  subagent_types: [general-purpose]   # auto-detected from .claude/agents/, applied without asking
+  autonomy_default: strict      # how much it DOES without you
+  teaching_stance: curious      # how much it EXPLAINS while it works: student | curious | quiet-pro
   memory_enabled: false         # solo user with no persistent memory store
   memory_dir: ""
 

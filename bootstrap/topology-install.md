@@ -89,8 +89,10 @@ one-line role from their README/package name → the `{APPS}` roster.
 `{COMMIT_CONVENTION}`. Existing `CLAUDE.md`/`AGENTS.md`/`.cursorrules`: read them — they often
 state the stack, test command, and house rules verbatim; treat them as high-confidence sources.
 
-**Agent setup** — existing `.claude/agents/*.md` → candidate `{SUBAGENT_TYPES}`. Presence of a
-delegation CLI/protocol is NOT auto-detected; ask in the interview.
+**Agent setup** — existing `.claude/agents/*.md` → `{SUBAGENT_TYPES}`, **auto-adopted with no
+interview question** (sets `{USE_SUBAGENTS}=true`; ask-by-exception only — spec §3). Presence of a
+delegation CLI/protocol (e.g. a GLM/Codex pair-protocol) is a *separate* axis and IS asked
+(`{MULTI_AGENT}` intent can't be inferred — an operator may have the infra but want solo runs).
 
 Produce a **detected draft** of the profile and hold it. Note confidence per field
 (detected / inferred / unknown). Do not write anything yet.
@@ -109,8 +111,12 @@ that have no safe default (multi-agent, compass enable).
 **Round 2 — Execution posture.**
 - Tier-doc layer: "Keep a tiered platform-doc layer (platform / workstreams / patterns), or skip
   it for a flatter docs tree?" → `{TIER_ENABLED}` (+ labels if they want custom names).
-- Autonomy default: strict (every decision pauses for you) / balanced / autopilot →
-  `{AUTONOMY_DEFAULT}`.
+- Autonomy default — how much the agent *does* without you: strict (every decision pauses for you) /
+  balanced / autopilot → `{AUTONOMY_DEFAULT}`.
+- Teaching stance — how much the agent *explains* while it works (orthogonal axis, always on):
+  `student` (lessons by default; dial down on request) / `curious` (flags learnable moments, you pick
+  what to go deep on) / `quiet-pro` (silent unless it infers you hit a snag) → `{TEACHING_STANCE}`.
+  See `TEACHING-STANCE-PROTOCOL.md`.
 - Branch prefix for worktrees → `{BRANCH_PREFIX}` (default `topology/`); push policy
   (`per-category` / `end-of-sprint` / `manual`) → `{PUSH_POLICY}`.
 
@@ -119,8 +125,11 @@ that have no safe default (multi-agent, compass enable).
   → `{MULTI_AGENT}`. If yes: agent name → `{DELEGATE_AGENT_NAME}`, opt-in flag →
   `{DELEGATE_FLAG}`, shell invocation → `{DELEGATE_INVOKE}`, optional pair-protocol path →
   `{DELEGATE_PROTOCOL_FILE}`. If no, every delegation block compiles out — confirm that's wanted.
-- "Use Claude Code Task subagents for parallel dispatch?" → `{USE_SUBAGENTS}`; which types →
-  `{SUBAGENT_TYPES}` (offer the detected `.claude/agents` names).
+- Subagents — **auto, do not ask (ask-by-exception, spec §3).** If `.claude/agents/*.md` exist, set
+  `{USE_SUBAGENTS}=true` and `{SUBAGENT_TYPES}` to the detected roster and integrate them with no
+  stoppage — a pre-existing specialist agent is unambiguous intent. Surface a question **only** on a
+  genuine ambiguity the scan can't resolve (zero agents but dispatch needs one; two detected agents with
+  colliding roles). Otherwise just report what was adopted.
 - Persistent agent memory to keep in sync at promotion? → `{MEMORY_ENABLED}` / `{MEMORY_DIR}`
   (default off).
 
@@ -218,7 +227,7 @@ recompile the affected commands, etc.) and note it. Never write an unapproved pr
 Profile:        .topology/profile.yml   (system v<version>)
 Commands molded: <N> topology<, M compass> → <commands_dir>/
 Compiled for:   <PRIMARY_LANGUAGE> · <PACKAGE_MANAGER> · docs at <DOCS_ROOT>
-Posture:        autonomy=<…>  multi_agent=<yes/no>  subagents=<…>  compass=<on/off>
+Posture:        autonomy=<…>  teaching=<student/curious/quiet-pro>  multi_agent=<yes/no>  subagents=<…>  compass=<on/off>
 
 Dropped (not applicable to this project):
 - <e.g. delegation pair-mode blocks (solo profile)>
@@ -248,7 +257,9 @@ Value-add: <accepted proposals, or "none / declined">
 - **Empty tokens gate prose, they don't leave holes.** A blank `{TEST_COMMAND_E2E}` flips
   `{HAS_E2E}` false and the e2e prose compiles out. Don't invent a fake value to fill a gap.
 - **The interview confirms; the scan detects.** Don't ask what a file already answers, and don't
-  guess what only the operator knows (delegation, autonomy posture, milestones).
+  guess what only the operator knows (delegation intent, autonomy posture, teaching stance,
+  milestones). Subagents are the opposite — auto-adopt the detected `.claude/agents/` roster without
+  asking (ask-by-exception only).
 - **Never fabricate global contracts/seams/decisions or compass roadmap content.** Those are
   produced by the lifecycle commands from real project material, not by the installer.
 - **Re-running is safe.** `--recompile` rebuilds from the existing profile; a full re-run lets the

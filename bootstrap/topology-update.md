@@ -83,10 +83,17 @@ ascending id order:
 4. After a semantic update is successfully applied to all its targets, append its `id` to
    `profile.applied_updates` and update `compiled_at`.
 
-> **Run-once guarantee.** An update already in `applied_updates` is skipped. A fresh install gets
-> the same paradigm because the author also committed it to the template; an existing install gets
-> it woven in here. Both paths converge on the same end state. Re-running this command is always
-> idempotent.
+**Then, if `{COMPASS_ENABLED}`, do the same for the compass queue** `{SYSTEM_DIR}/compass/updates/NNNN-*.md`.
+Record those ids **namespaced as `compass:NNNN-...`** in `profile.applied_updates`, so they never
+collide with the identically-numbered topology queue (both have a `0000-baseline`). This is why
+`topology-update` is the single umbrella for the whole system: there is no separate compass-update
+command — recompiling/updating compass happens here (or via `/compass-install --recompile` for the
+compass layer alone).
+
+> **Run-once guarantee.** An update already in `applied_updates` (bare id for topology, `compass:`-
+> prefixed for compass) is skipped. A fresh install gets the same paradigm because the author also
+> committed it to the template; an existing install gets it woven in here. Both paths converge on the
+> same end state. Re-running this command is always idempotent.
 
 ### Step 5: Bump version & report
 

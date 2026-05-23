@@ -56,9 +56,11 @@ cp "$SRC/bootstrap/topology-update.md"  "$CMD/topology-update.md"
 if [[ -f "$SRC/compass-prompt-system/bootstrap/compass-install.md" ]]; then
   cp "$SRC/compass-prompt-system/bootstrap/compass-install.md" "$CMD/compass-install.md"
 fi
-if [[ -f "$SRC/compass-prompt-system/bootstrap/compass-update.md" ]]; then
-  cp "$SRC/compass-prompt-system/bootstrap/compass-update.md" "$CMD/compass-update.md"
-fi
+# NOTE: there is intentionally no bootstrap `compass-update`. `compass-update` is the weekly
+# STATE-OF-THE-UNION cadence command, compiled into commands_dir by /topology-install or
+# /compass-install. Recompiling/updating the compass layer is done by /topology-update (umbrella,
+# covers both queues) or /compass-install --recompile. Vendoring a bootstrap compass-update here
+# would collide with the workflow command — see ABSTRACTION-SPEC §7.
 
 VER="$(cat "$SRC/VERSION" 2>/dev/null || echo '?')"
 echo

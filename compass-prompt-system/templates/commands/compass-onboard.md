@@ -16,6 +16,12 @@ Walk a new team member through the {PROJECT_NAME} project with tailored context 
 
 ## Instructions
 
+> **Teaching stance for onboarding.** A new contributor is, by definition, learning the craft of this
+> project — so this command runs its session in **`student`** stance regardless of the profile default
+> (see `TEACHING-STANCE-PROTOCOL.md`): explain the *why* behind the cadence, the milestone math, and the
+> role's responsibilities as you go, and tell the contributor they can dial it down ("fewer lessons") or
+> that the project's normal stance is `{TEACHING_STANCE}` once they're up to speed.
+
 ### Step 1: Load Compass Docs
 
 Read all Compass documents in order:

@@ -57,9 +57,13 @@ on its own:
 ```
 ```
 # in Claude Code, in your project:
-/compass-install      # mold the Compass layer + seed the strategy docs
-/compass-update       # recompile + apply one-time Compass updates
+/compass-install            # mold the Compass layer + seed the strategy docs
+/compass-install --recompile  # recompile the Compass layer after pulling system updates
 ```
+
+(Note: `/compass-update` is the *weekly cadence* command — it refreshes STATE-OF-THE-UNION, it does
+not recompile. Pulling system improvements is done by `/topology-update` (umbrella) or
+`/compass-install --recompile`. See `ABSTRACTION-SPEC.md` §7.)
 
 `/compass-install` writes only the `compass:` section of `.topology/profile.yml` (preserving any
 Topology settings already there), compiles the Compass commands, and seeds the strategy-doc

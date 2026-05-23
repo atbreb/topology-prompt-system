@@ -142,6 +142,17 @@ When abstracting a prompt, apply these in order:
 - `CLAUDE.md` — a Claude Code platform convention. Universal. Never tokenized.
 - ID grammars (`DL-`, `GC-`, `GS-`, `GD-`, `C1`, `S1`) — methodology, not binding.
 
+### Agent-integration rule (ask-by-exception)
+
+When the project already defines subagents (`.claude/agents/*.md`), the installer **adopts them
+automatically** — sets `USE_SUBAGENTS=true` and `SUBAGENT_TYPES` to the detected roster — and does
+**not** ask the operator to confirm the roster. A pre-existing specialist agent is unambiguous intent.
+The installer surfaces a question **only** when there is a genuine ambiguity it cannot resolve from the
+repo (e.g., zero agents exist but a command's dispatch logic needs one, or two detected agents have
+colliding roles). This keeps the interview focused on the few preferences a scan truly can't infer
+(autonomy posture, teaching stance, delegation intent) rather than re-confirming what the filesystem
+already states.
+
 ---
 
 ## 4. The placeholder registry
@@ -221,9 +232,10 @@ Every token the compiler knows. `auto` = resolvable by the scan; `interview` = a
 | `{DELEGATE_FLAG}` | interview | `--delegate` | The opt-in flag in $ARGUMENTS. |
 | `{DELEGATE_INVOKE}` | interview | — | Shell form, e.g. `glm "<task>"`. |
 | `{DELEGATE_PROTOCOL_FILE}` | interview | — | Pair-protocol path. Empty-able. |
-| `{USE_SUBAGENTS}` | interview | `true` | Whether to use Claude Code Task subagents for dispatch. |
-| `{SUBAGENT_TYPES}` | interview (list) | `[general-purpose]` | e.g. backend-coder, frontend-coder. |
+| `{USE_SUBAGENTS}` | auto | `true` | Auto-set true when `.claude/agents/*.md` exist. Whether to use Claude Code Task subagents for dispatch. |
+| `{SUBAGENT_TYPES}` | auto (list) | `[general-purpose]` | **Auto-detected from `.claude/agents/*.md` and applied with no question** (ask-by-exception only — see §3 agent-integration rule). e.g. backend-coder, frontend-coder. |
 | `{AUTONOMY_DEFAULT}` | interview | `strict` | strict / balanced / autopilot — default HITL posture. |
+| `{TEACHING_STANCE}` | interview | `curious` | `student` / `curious` / `quiet-pro` — default *teaching* posture (how much the agent explains while it works). Orthogonal to autonomy. Always on; behavior spec in `TEACHING-STANCE-PROTOCOL.md`. |
 | `{MEMORY_ENABLED}` | interview | `false` | Whether the agent keeps a persistent long-term memory store to sync at promotion. Gates `topology-promote` Step 6F. |
 | `{MEMORY_DIR}` | interview | — | Path to that memory store. Empty-able; only meaningful if `MEMORY_ENABLED`. |
 
@@ -355,6 +367,12 @@ next run. Re-running the engine is always safe and idempotent.
 - **Foundation/global doc filenames are frozen** (they're system constants, §3).
 - **Token names are frozen.** Adding tokens is fine; renaming one breaks every template that
   uses it. Rename via a spec amendment + a sweep update.
+- **`compass-update` is the weekly STATE-OF-THE-UNION cadence command** (the workflow basename,
+  referenced throughout the cadence). It is **not** a system-management command. Recompiling/pulling
+  improvements for the compass layer is done by `/topology-update` (which covers Topology *and*
+  Compass) or `/compass-install --recompile` — never by a second command also named `compass-update`.
+  The bootstrap installer must not vendor a `compass-update` "recompile" command; doing so collides
+  with the workflow command and violates this contract. (Resolved 2026-05-23; see `updates/`.)
 
 If all four hold, any future improvement reaches every existing install with no manual surgery.
 
@@ -388,3 +406,9 @@ The same algorithm runs for `compass-prompt-system/templates/commands/` when
 - **v1.0.0** — Initial spec. Extracted from the CalibraOS topology + compass prompt systems
   (2026-05-21). Establishes the two-state model, closed-vocabulary substitution, the hybrid
   update model, and the naming-stability contract.
+- **v1.1.0** — (2026-05-23) Added the **teaching-stance** axis (`{TEACHING_STANCE}`, §4.4;
+  `TEACHING-STANCE-PROTOCOL.md`) — orthogonal to autonomy, three modes (`student`/`curious`/
+  `quiet-pro`), always on. Made subagent adoption **auto / ask-by-exception** (§3 agent-integration
+  rule; `USE_SUBAGENTS`/`SUBAGENT_TYPES` now `auto`). Froze `compass-update` as the weekly workflow
+  command in the naming contract (§7), resolving the bootstrap-vs-cadence collision. Ships with
+  semantic update `updates/0002-add-teaching-stance`.

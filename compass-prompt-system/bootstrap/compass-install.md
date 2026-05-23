@@ -11,7 +11,7 @@ section of the profile, and **compile** every Compass command template into a co
 project-native command — so every `/compass-*` command speaks this project's real apps, paths, team
 model, and cadence instead of generic placeholders.
 
-This runs once to set up; re-running it recompiles (equivalent to `/compass-update --recompile`).
+This runs once to set up; re-running it recompiles (equivalent to `/compass-install --recompile`).
 
 > Read `{SYSTEM_DIR}/ABSTRACTION-SPEC.md` before compiling — it is the canonical contract for the
 > template syntax (§2), the §4.5 Compass token registry, and the compile algorithm (§8). Where this
@@ -37,7 +37,7 @@ This runs once to set up; re-running it recompiles (equivalent to `/compass-upda
 │       ├── templates/
 │       │   ├── commands/    # compass command templates (compass-onboard/check/update/...)
 │       │   └── skeletons/   # the compass doc skeletons (NORTH-STAR, MILESTONES, ...)
-│       └── updates/         # one-time semantic updates (§ compass-update)
+│       └── updates/         # one-time semantic updates (applied by /topology-update or /compass-install --recompile)
 └── profile.yml              # THIS project's molding (this command writes the compass: section)
 ```
 
@@ -175,7 +175,7 @@ Dropped:        <e.g. delegation prose (solo profile), or "none">
 1. Fill in {COMPASS_DIR}/NORTH-STAR.md — the rest of Compass orients off it.
 2. Onboard someone: /compass-onboard <role>
 3. Start the weekly rhythm: /compass-weekly-brief
-4. To pull future improvements: re-run install.sh from the system repo, then /compass-update
+4. To pull future improvements: re-run install.sh from the system repo, then /topology-update (covers Compass) or /compass-install --recompile
 ```
 
 ---
@@ -184,8 +184,9 @@ Dropped:        <e.g. delegation prose (solo profile), or "none">
 
 - **Compiled commands are build artifacts — never hand-edit them.** All molding lives in
   `.topology/profile.yml`. To change how a command reads, edit the `compass:` section and recompile.
-  This is what makes `/compass-update` safe: there is nothing of yours in the compiled output to
-  clobber.
+  This is what makes `/compass-install --recompile` (and `/topology-update`) safe: there is nothing of
+  yours in the compiled output to clobber. (Note: `/compass-update` is the weekly STATE-OF-THE-UNION
+  cadence command, not a recompile command — see ABSTRACTION-SPEC §7.)
 - **Closed-vocabulary substitution is load-bearing.** Only registry tokens are replaced, so literal
   `{...}` strings in the prompts survive intact.
 - **Empty tokens gate prose, they don't leave holes.** Empty `{PRIMARY_MILESTONE}` flips the

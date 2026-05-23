@@ -76,9 +76,10 @@ computed by the compiler if omitted; set them only to override.
 | `delegate_flag` | string | `--delegate` | `{DELEGATE_FLAG}` |
 | `delegate_invoke` | string | — | `{DELEGATE_INVOKE}` |
 | `delegate_protocol_file` | string (empty-able) | — | `{DELEGATE_PROTOCOL_FILE}` |
-| `use_subagents` | bool | `true` | `{USE_SUBAGENTS}` |
-| `subagent_types` | list<string> | `[general-purpose]` | `{SUBAGENT_TYPES}` |
+| `use_subagents` | bool (auto) | `true` | `{USE_SUBAGENTS}` — auto-true when `.claude/agents/*.md` exist |
+| `subagent_types` | list<string> (auto) | `[general-purpose]` | `{SUBAGENT_TYPES}` — **auto-detected from `.claude/agents/*.md`, applied without asking** (ask-by-exception; spec §3) |
 | `autonomy_default` | enum(strict,balanced,autopilot) | `strict` | `{AUTONOMY_DEFAULT}` |
+| `teaching_stance` | enum(student,curious,quiet-pro) | `curious` | `{TEACHING_STANCE}` — how much the agent explains while it works (orthogonal to autonomy; always on; `TEACHING-STANCE-PROTOCOL.md`) |
 | `memory_enabled` | bool | `false` | `{MEMORY_ENABLED}` |
 | `memory_dir` | string (empty-able) | — | `{MEMORY_DIR}` |
 

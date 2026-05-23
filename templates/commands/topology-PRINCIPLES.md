@@ -73,9 +73,31 @@ This is the canonical checklist `topology-implement` Step 2.7 enforces. Every ph
    phase-N/PHASE-N-SESSION-PROMPT.md
    {PROJECTS_ACTIVE_DIR}/<project>/categories/<slug>/implementation/
    phase-N/PHASE-N-RUNBOOK.md
+
+7. Active teaching stance — session override if set, else profile
+   `agents.teaching_stance` (`{TEACHING_STANCE}` for this project)
+   — selects the teaching surface per TEACHING-STANCE-PROTOCOL.md; additive
+   output only, never gates or alters the work
 ```
 
 Loading more than this on entry is over-eager — wait until plan-mode surfaces the specific files plan-mode needs. Loading less is under-prepared — the agent will guess at constraints that are already settled.
+
+---
+
+## Teaching stance — how much the agent explains while it works
+
+A second axis, orthogonal to autonomy. **Autonomy** governs how much the agent *does* without you;
+**teaching stance** governs how much it *explains to you* while doing it. The full behavior spec is
+`TEACHING-STANCE-PROTOCOL.md`; the one-paragraph version:
+
+- **`student`** — lessons ON by default at every meaningful juncture; user dials volume down per session.
+- **`curious`** — agent flags learnable moments inline (`💡 Learnable:`); user picks what to go deep on.
+- **`quiet-pro`** — silent by default; offers a lesson only when it *infers* real friction, and only as a one-line ask.
+
+This project's default stance is **`{TEACHING_STANCE}`**. Two non-negotiables for every stance:
+teaching is **additive output, never a gate** (only the methodology's real HITL triggers gate), and it
+**never distorts the methodology to simplify a lesson** — `Proposed` vs `Active`, append-only logs, and
+bilateral seam contracts stay literally true no matter how the agent narrates them.
 
 ---
 
@@ -119,6 +141,7 @@ Both patterns trade textbook strictness for end-to-end pragmatism. They are NOT 
 | `topology-phase-plan` | Failure mode 5 informs the Decisions column on phase tables; foundation mutation discipline informs append-only Decision Log |
 | `topology-implement` | Implementer pre-flight context loadout (§) is the canonical Step 2.7 checklist; failure modes 4 + 5 are the load-bearing motivations |
 | `topology-verify` | Producer/consumer bilateral discipline (§ failure mode 3); consumer-expectations field; evidence-deferral pattern |
+| *(all commands)* | Teaching stance (§) — the loadout reads the active stance and selects the teaching surface per `TEACHING-STANCE-PROTOCOL.md`; applies everywhere, additive only |
 
 When updating any topology skill, check this doc first. If a proposed change weakens any failure-mode mitigation, the change is wrong. If a proposed change strengthens a mitigation but contradicts another principle here, update this doc first to reflect the new principle, then update the skill.
 
@@ -127,3 +150,4 @@ When updating any topology skill, check this doc first. If a proposed change wea
 ## Versioning
 
 - **v1** (2026-05-07) — Initial principles doc. Authored as part of the OpenClaw rework + topology-skill-tightening session. Based on the existing topology-* skills + 5-failure-mode analysis. Replaces no prior doc.
+- **v2** (2026-05-23) — Added the teaching-stance axis (`student`/`curious`/`quiet-pro`) and its pre-flight loadout step. Orthogonal to autonomy; spec in `TEACHING-STANCE-PROTOCOL.md`.
