@@ -16,14 +16,8 @@ Run after `topology-trace` has confirmed a specific break point. The trace repor
 
 ## Prerequisites
 
-- [ ] `categories/*/VERIFICATION-REPORT.md` exists for both producer and consumer categories
-- [ ] A `topology-trace` report exists for this seam (in `{PROJECTS_ACTIVE_DIR}/<project-name>/` or `{PROJECTS_ARCHIVE_DIR}/<project-name>/`)
-- [ ] The break point is confirmed — not just suspected
-
-If no trace report exists:
-> Run `/topology-trace <project-name> <seam-slug> "<data flow>"` first to confirm the break point before patching.
-
----
+Run: `/topology-ready <project-name> <category-slug> --action patch`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
 ## Instructions
 

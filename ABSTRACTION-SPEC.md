@@ -422,3 +422,16 @@ The same algorithm runs for `compass-prompt-system/templates/commands/` when
   `DOC_EDIT`, `E2E_TESTCASE`, `HOP_EVIDENCE`, `CATEGORY_CLAUDE`). These are methodology
   vocabulary — treat them as system constants (§3 "What NOT to tokenize") alongside the
   foundation-doc filenames. Ships with semantic update `updates/0003-add-workflow-orchestration`.
+- **v1.3.0** — (2026-07-25) Added the **NL routing layer**: a natural-language command router
+  (UserPromptSubmit hook) that classifies casual developer language → correct slash command via
+  regex-first classification + optional LLM fallback. Includes: 5-phase interview methodology
+  (captures operator's personal vocabulary), intent map compiler (JSON Schema draft 2020-12,
+  SHA-256 integrity verification), composition chains (`chain` + `chainByContext` for
+  context-scoped resolution), compound prompt detection, routing denylist, and feedback loop
+  prevention. 16 new utility commands (topology-ready, topology-gates, 5 atomic check classes,
+  topology-blocks/dependents/impact, topology-coverage/run-proofs, topology-debt/deferred,
+  topology-search, topology-correct). Centralized prerequisite checking: 30+ commands delegate
+  to `/topology-ready --action <action>`. Doc-walk pipeline multi-category orchestration.
+  Compass NL bridge: all 5 compass commands NL-routable. New template directories:
+  `templates/scripts/{hooks,interview,intent-map}`. Intent map is personal storage
+  (`~/.claude/topology/`) — never committed to version control.

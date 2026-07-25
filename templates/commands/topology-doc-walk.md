@@ -58,17 +58,8 @@ Strip `{DELEGATE_FLAG}` from `$ARGUMENTS` before substituting into the positiona
 
 ## Prerequisites
 
-- [ ] `{PROJECTS_ACTIVE_DIR}/<project-name>/TOPOLOGY-CLAUDE.md` exists
-- [ ] `{PROJECTS_ACTIVE_DIR}/<project-name>/CONTRACT-SHEET.md` exists
-- [ ] `{PROJECTS_ACTIVE_DIR}/<project-name>/SYSTEM-TOPOLOGY.md` exists
-- [ ] All target categories appear in `TOPOLOGY-CLAUDE.md` "Categories" table
-
-If any are missing, stop and report:
-> Run `/topology-init <project-name>` first (or correct the category list).
-
-If `--group <N>` is provided, the project's `TOPOLOGY-CLAUDE.md` MUST have a "Parallel Groups" section with a Group N. If absent, stop and report which groups are defined.
-
----
+Run: `/topology-ready <project-name> --action project-read`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
 ## Instructions
 

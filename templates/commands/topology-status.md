@@ -23,11 +23,8 @@ Read-only dashboard. Renders the current state of the entire topology project â€
 
 ## Prerequisites
 
-- [ ] `TOPOLOGY-CLAUDE.md` exists
-
-If the project doesn't exist, stop and report: "Project `<project-name>` not found. Run `/topology-init <project-name>` to create it."
-
----
+Run: `/topology-ready <project-name> --action project-read`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
 ## Instructions
 

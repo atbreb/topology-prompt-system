@@ -21,19 +21,8 @@ This is a git/PR mechanics command — it carries **no agent fan-out and needs n
 
 ## Prerequisites
 
-- [ ] Must be on a synced local `main` (not inside a worktree). Local `main` MUST equal `origin/main` — `git fetch origin && git rev-list --count origin/main..main` must be `0`. If not, STOP and reconcile per PRINCIPLES § Git & PR coordination (rule 3) before landing.
-- [ ] `gh` CLI available and authenticated (`gh auth status`) — landing is via `gh pr create`
-- [ ] `TOPOLOGY-CLAUDE.md` exists and has a `Parallel Groups` section
-- [ ] At least one topology worktree branch exists with commits ahead of `origin/main`
-
-If inside a worktree, stop and report:
-
-> You are currently inside a worktree. Exit the worktree first with ExitWorktree,
-> then run topology-merge from the main branch.
-
-If `gh` is unavailable, stop and report that landing requires the GitHub CLI (push the branch manually and open the PR in the repository's web UI as a fallback — but never `git merge` into local `main`).
-
----
+Run: `/topology-ready <project-name> <category-slug> --action merge`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
 ## Instructions
 

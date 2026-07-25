@@ -37,17 +37,8 @@ Where a test case maps to an automated end-to-end suite, prefer codifying it the
 
 ## Prerequisites
 
-- [ ] All categories have `VERIFICATION-REPORT.md`
-- [ ] `VERIFICATION-TABLE.md` has no `✗` or blank cells (all `✓` or `—`)
-- [ ] Most recent integration checkpoint is `CLEAN`
-- [ ] Project is currently in `{PROJECTS_ACTIVE_DIR}/<project-name>/`
-
-If any prerequisite fails, stop:
-
-> Project `<project-name>` is not ready for E2E testing.
-> [List which prerequisite failed and what command to run to resolve it.]
-
----
+Run: `/topology-ready <project-name> <category-slug> --action e2e`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
 ## Instructions
 

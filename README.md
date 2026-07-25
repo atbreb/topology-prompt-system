@@ -153,9 +153,33 @@ node .claude/scripts/intent-map/compile-intent-map.js --input <interview-output.
 #   "timeout": 5 }] }] }
 ```
 
-After activation, typing "what does the HIL queue look like" routes to `/topology-gates`. Typing "audit everything" routes to a 7-step chain. Commands like `topology-promote` and `topology-autopilot` are denylisted — they require explicit invocation.
+After activation, typing "what does the HIL queue look like" routes to `/topology-gates`. "what risks are we carrying" routes to `/compass-risk`. "audit everything" routes to a context-aware chain — 7 steps in a topology project, 2 in the harness, 2 in a codebase. "compass check-in" chains `/compass-check → /compass-risk → /compass-update`. Commands like `topology-promote` and `topology-autopilot` are denylisted — they require explicit invocation.
 
 The interview captures YOUR vocabulary. It's personal data — the intent map is stored at `~/.claude/topology/`, outside version control.
+
+The system includes these capabilities:
+
+| Capability | What it does |
+|-----------|-------------|
+| **Regex-first classifier** | Regex + keyword fast path (<1ms) catches 70-80% of inputs; LLM fallback for the rest |
+| **Composition chains** | Single phrase → command sequence (e.g. "verify and integrate" → `/topology-verify → /topology-integrate`) |
+| **Context-scoped chains** | "audit everything" resolves to different chains based on working directory |
+| **Compass NL bridge** | All 5 compass commands routable via natural language |
+| **Compound detection** | Splits on "and", "then", "after that" conjunctions → multi-step routing |
+| **Routing denylist** | Destructive/gated commands never NL-route — explicit invocation only |
+| **Feedback loop prevention** | Echo + own-output detection prevents the hook from classifying its own hints |
+| **Personal storage** | Intent map at `~/.claude/topology/` with SHA-256 integrity verification — no merge conflicts, no supply-chain surface |
+| **Prerequisite delegation** | All 30+ topology commands delegate to `/topology-ready --action <action>` — one prerequisite checker, not 30 copy-pasted sections |
+| **Doc-walk pipeline** | Multi-category doc walks use `pipeline()` orchestration — categories progress independently, ~40% faster |
+| **16 utility commands** | Blocks, checks (5 atomic), coverage, debt/deferred, dependents, gates, impact, ready, run-proofs, search, correct — all NL-routable |
+
+The complete set of scripts and schemas:
+- `.claude/scripts/hooks/nl-router.js` — the UserPromptSubmit hook (classifier, compound detection, denylist, chain resolution)
+- `.claude/scripts/interview/nl-interview.js` — 5-phase interview engine with embedded scenario bank
+- `.claude/scripts/interview/domain-anchor-scanner.js` — reads active topology projects for scenario population
+- `.claude/scripts/intent-map/compile-intent-map.js` — transforms interview responses into validated intent map
+- `categories/nl-intent-map/intent-map.schema.json` — JSON Schema draft 2020-12 for intent maps
+- `categories/nl-composition/` — multi-intent composition (compound detection, chain: string[], chainByContext)
 
 ---
 
@@ -190,6 +214,16 @@ topology-patch / topology-merge / topology-dispatch           Surgical fixes, wo
 topology-doc-walk / topology-next                             Batch-walk docs, pick the next move
 topology-eval                                                  Eval-gate skill changes (pass@k / pass^k)
 topology-self-audit                                            Maturity scorecard for the harness itself
+
+### Topology — NL routing utilities (molded per-operator)
+topology-ready          Centralized prerequisite checker (30+ commands delegate to it)
+topology-gates          HITL gate dashboard across all active projects
+topology-blocks / topology-dependents / topology-impact   Blocking chain, dependents, and impact analysis
+topology-check-docs / topology-check-cells / topology-check-drift / topology-check-scaffolding / topology-check-seams   Five atomic read-only check classes (0=clean, 1=findings)
+topology-coverage / topology-run-proofs                   Proof and coverage analysis
+topology-debt / topology-deferred                         Debt inventory and deferred-item tracking
+topology-search                                            NL command discovery ("what command does X?")
+topology-correct                                           NL misroute correction (amend intent map)
 ```
 
 The system molds itself along two **independent** axes:

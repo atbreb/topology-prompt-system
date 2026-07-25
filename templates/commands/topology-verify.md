@@ -26,17 +26,8 @@ Post-implementation verification for one category. Checks every assertion in the
 
 ## Prerequisites
 
-- [ ] All implementation phases are Complete (check runbook statuses)
-- [ ] `categories/<category-slug>/FUTURE-STATE.md` exists
-- [ ] `categories/<category-slug>/CURRENT-STATE.md` exists (baseline for regression check)
-- [ ] `CONTRACT-SHEET.md` exists
-- [ ] `SYSTEM-TOPOLOGY.md` exists
-
-If implementation phases are not all Complete, stop and report:
-
-> Not all implementation phases are complete. Run `/topology-implement <project-name> <category-slug>` to advance.
-
----
+Run: `/topology-ready <project-name> <category-slug> --action verify`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
 ## Instructions
 

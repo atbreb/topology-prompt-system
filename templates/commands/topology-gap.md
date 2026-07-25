@@ -19,16 +19,9 @@ When the Workflow tool is available the fan-out path (Step 2 — Workflow mode) 
 
 ## Prerequisites
 
-- [ ] `TOPOLOGY-CLAUDE.md` exists
-- [ ] `CONTRACT-SHEET.md` exists
-- [ ] `SYSTEM-TOPOLOGY.md` exists
-- [ ] `categories/<category-slug>/CURRENT-STATE.md` exists and is not empty
+Run: `/topology-ready <project-name> <category-slug> --action gap`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
-If `CURRENT-STATE.md` is missing, stop and report: "Run `/topology-current-state <project-name> <category-slug>` first."
-
----
-
-{{#if MULTI_AGENT}}
 ## {DELEGATE_AGENT_NAME} Pair Mode (optional)
 
 If `{DELEGATE_FLAG}` appears anywhere in `$ARGUMENTS`, enter **{DELEGATE_AGENT_NAME} Pair Mode** before executing any step below. Full rules live in `{DELEGATE_PROTOCOL_FILE}`.

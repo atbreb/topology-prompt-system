@@ -39,20 +39,8 @@ Three documents created at `{DOCS_ROOT}/`:
 
 ## Prerequisites
 
-- [ ] `{DOCS_ROOT}/` exists
-- [ ] `{DOCS_ROOT}/README.md` exists
-
-If `GLOBAL-CONTRACTS.md`, `GLOBAL-TOPOLOGY.md`, or `GLOBAL-DECISIONS.md` already exist, stop:
-
-> Global topology documents already exist. Re-running this command would overwrite
-> accumulated platform history.
->
-> To update the global docs from a completed project, use:
->   /topology-promote <project-name> --execute
->
-> To inspect current global state, read the three global docs directly.
-
----
+Run: `/topology-ready --action global-init`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
 ## Instructions
 

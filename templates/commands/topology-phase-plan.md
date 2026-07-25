@@ -19,21 +19,9 @@ Produce a phased implementation plan for one category, then scaffold it using `p
 
 ## Prerequisites
 
-- [ ] `TOPOLOGY-CLAUDE.md` exists
-- [ ] `CONTRACT-SHEET.md` exists
-- [ ] `SYSTEM-TOPOLOGY.md` exists
-- [ ] `categories/<category-slug>/CURRENT-STATE.md` exists
-- [ ] `categories/<category-slug>/GAP-ANALYSIS.md` exists
+Run: `/topology-ready <project-name> <category-slug> --action phase-plan`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
-If either analysis document is missing, stop and report the missing prerequisite with the command to generate it.
-
-{{#if USE_SUBAGENTS}}
-> **Workflow opt-in.** Step 5 below embeds a light `Workflow` `parallel()` fan-out (one agent per phase session prompt). Invoking this command **is** the opt-in — per the Workflow tool's own rule, a topology skill whose instructions tell you to call `Workflow` authorizes that call. You do not need to ask separately. Steps 1–4 stay in the main loop (they are judgment + a mandatory shared-skill gate, not fan-out); only Step 5 is a workflow. There is **no HITL-mid-run** and no E2E/promote boundary in this command. The one hard gate — the Step 4 prep-scaffolding verification — is a **HARD HALT**, not a HITL return.
-
-{{/if}}
----
-
-{{#if MULTI_AGENT}}
 ## {DELEGATE_AGENT_NAME} Pair Mode (optional)
 
 If `{DELEGATE_FLAG}` appears anywhere in `$ARGUMENTS`, enter **{DELEGATE_AGENT_NAME} Pair Mode** before executing any step below. Full rules live in `{DELEGATE_PROTOCOL_FILE}`.

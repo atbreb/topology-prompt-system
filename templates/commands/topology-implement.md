@@ -27,31 +27,9 @@ This command is usually invoked **by the `/topology-sprint` workflow's Build sta
 
 ## Prerequisites
 
-All four are **hard requirements**. None of them are optional and none can be substituted with a hand-written equivalent.
+Run: `/topology-ready <project-name> <category-slug> --action implement`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
-- [ ] `categories/<category-slug>/FUTURE-STATE.md` exists
-- [ ] `categories/<category-slug>/implementation/CLAUDE.md` exists (must be the prep-scaffolding output, not a slim hand-written mirror)
-- [ ] `categories/<category-slug>/implementation/<Category>-Implementation-Plan.md` exists
-- [ ] `categories/<category-slug>/implementation/phase-1/PHASE-1-SESSION-PROMPT.md` and `PHASE-1-RUNBOOK.md` exist (one pair per phase declared in PHASE-PLAN.md)
-
-If `FUTURE-STATE.md` is missing, stop and report:
-
-> Future state documentation is required before implementation begins. This ensures
-> there is a pre-written specification to verify against.
-> Run: `/topology-future-state <project-name> <category-slug>`
-
-If `<Category>-Implementation-Plan.md` is missing OR any `phase-N/` directory is missing for a phase declared in `categories/<category-slug>/PHASE-PLAN.md`, stop and report:
-
-> ❌ Implementation cannot start: scaffolding is incomplete for `<slug>`.
-> Missing: `<list of missing files/dirs>`.
-> This usually means `topology-phase-plan` Step 4 (project-prep-scaffolding) was skipped — the slim-mirror anti-pattern. Do **not** patch by hand.
-> Fix: re-run `/topology-phase-plan <project-name> <slug>` and ensure its Step 4 verification passes.
-
-This is not optional. Implementation without per-phase session prompts and runbooks removes the topology audit trail and breaks `project-next-phase` resume semantics. Implementation without a future state document removes the ability to verify correctness post-implementation.
-
----
-
-{{#if MULTI_AGENT}}
 ## {DELEGATE_AGENT_NAME} Pair Mode (optional)
 
 If `{DELEGATE_FLAG}` appears anywhere in `$ARGUMENTS`, enter **{DELEGATE_AGENT_NAME} Pair Mode** before executing any step below. Full rules live in `{DELEGATE_PROTOCOL_FILE}`.

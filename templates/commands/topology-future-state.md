@@ -19,16 +19,8 @@ Produce the future state document for one category — what the category looks l
 
 ## Prerequisites
 
-- [ ] `TOPOLOGY-CLAUDE.md` exists
-- [ ] `CONTRACT-SHEET.md` exists
-- [ ] `SYSTEM-TOPOLOGY.md` exists
-- [ ] `categories/<category-slug>/CURRENT-STATE.md` exists
-- [ ] `categories/<category-slug>/GAP-ANALYSIS.md` exists
-- [ ] `categories/<category-slug>/implementation/` exists (phase plan scaffolded)
-
-If the implementation directory is missing, run `/topology-phase-plan <project-name> <category-slug>` first.
-
----
+Run: `/topology-ready <project-name> <category-slug> --action future-state`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
 ## What this command is (and is not)
 

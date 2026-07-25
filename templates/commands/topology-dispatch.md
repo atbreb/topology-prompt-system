@@ -37,18 +37,9 @@ Use Wave 2 whenever the Workflow tool is available. Invoke this command explicit
 
 ## Prerequisites
 
-- [ ] Sprint exists: `{PROJECTS_ACTIVE_DIR}/<project>/sprints/<sprint-id>/SPRINT-PLAN.md` (latest active sprint)
-- [ ] Category in flight: `categories/<category-slug>/PHASE-PLAN.md` exists
-- [ ] FUTURE-STATE exists: `categories/<category-slug>/FUTURE-STATE.md`
-- [ ] Implementation scaffolded: `categories/<category-slug>/implementation/CLAUDE.md`
-- [ ] Git working tree clean (uncommitted changes block parallel dispatch — agents would fight over the diff)
-- [ ] **Divergence guard (Wave 2):** `git fetch origin && git rev-list --count origin/main..main` is 0 before spawning worktrees
+Run: `/topology-ready <project-name> <category-slug> --action dispatch`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
-If any are missing, abort with the specific remediation command (e.g., `Run /topology-future-state <project> <category> first`).
-
----
-
-{{#if MULTI_AGENT}}
 ## {DELEGATE_AGENT_NAME} Pair Mode (optional)
 
 If `{DELEGATE_FLAG}` appears anywhere in `$ARGUMENTS`, the flag cascades to each dispatched specialist subagent. Each agent runs its own {DELEGATE_AGENT_NAME} split per `{DELEGATE_PROTOCOL_FILE}`. The dispatch orchestrator (this command) does not split — it routes.

@@ -46,12 +46,8 @@ The command will report if fewer than 2 categories have verified since the last 
 
 ## Prerequisites
 
-- [ ] `TOPOLOGY-CLAUDE.md` exists
-- [ ] `SYSTEM-TOPOLOGY.md` exists
-- [ ] `VERIFICATION-TABLE.md` exists
-- [ ] At least 2 categories have at least some verified cells in the Verification Table
-
----
+Run: `/topology-ready <project-name> <category-slug> --action integrate`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
 ## Instructions
 

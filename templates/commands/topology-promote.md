@@ -66,25 +66,8 @@ If the user runs `/topology-promote <project-name>` (without `--execute`) and th
 
 ## Prerequisites
 
-- [ ] All categories have `VERIFICATION-REPORT.md` with outcome `Full Pass`
-- [ ] `VERIFICATION-TABLE.md` has no `✗` or blank cells (all `✓` or `--`)
-- [ ] Most recent integration checkpoint is `Clean`
-- [ ] `TOPOLOGY-CLAUDE.md` exists
-- [ ] `{DOCS_ROOT}/GLOBAL-CONTRACTS.md` exists
-- [ ] `{DOCS_ROOT}/GLOBAL-TOPOLOGY.md` exists
-- [ ] `{DOCS_ROOT}/GLOBAL-DECISIONS.md` exists
-{{! GLOBAL-*.md filenames are system constants per §3 — only the {DOCS_ROOT} prefix is tokenized. }}
-
-If any prerequisite fails, stop:
-
-> Project `<project-name>` is not ready for promotion.
-> [List which prerequisite failed and what command to run to resolve it.]
-
-If global docs are missing:
-> Global topology documents have not been initialized.
-> Run `/topology-global-init --from-projects --from-tiers` before promoting.
-
----
+Run: `/topology-ready <project-name> <category-slug> --action promote`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
 ## Instructions
 

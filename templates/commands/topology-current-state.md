@@ -21,18 +21,9 @@ When the Workflow tool is available, this command fans out one read-only finder 
 
 ## Prerequisites
 
-The following must exist before this command runs:
+Run: `/topology-ready <project-name> <category-slug> --action current-state`.
+If NO-GO: resolve each unmet check per the remediation, then re-run.
 
-- [ ] `{PROJECTS_ACTIVE_DIR}/<project-name>/TOPOLOGY-CLAUDE.md`
-- [ ] `{PROJECTS_ACTIVE_DIR}/<project-name>/CONTRACT-SHEET.md`
-- [ ] `{PROJECTS_ACTIVE_DIR}/<project-name>/SYSTEM-TOPOLOGY.md`
-- [ ] The category slug must appear in the categories table in `TOPOLOGY-CLAUDE.md`
-
-If any prerequisite is missing, stop and report: "Run `/topology-init <project-name>` first."
-
----
-
-{{#if MULTI_AGENT}}
 ## {DELEGATE_AGENT_NAME} Pair Mode (optional)
 
 If `{DELEGATE_FLAG}` appears anywhere in `$ARGUMENTS`, enter **{DELEGATE_AGENT_NAME} Pair Mode** before executing any step below. Full rules live in `{DELEGATE_PROTOCOL_FILE}`.
