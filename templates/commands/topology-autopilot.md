@@ -2,6 +2,8 @@
 
 Chain sprints across multiple groups (and optionally projects). Writes an overarching integration plan upfront. Pivots cross-project via inference when `--cross-project` is enabled. Stops at HITL gates or at `--through-group` ceiling. Does NOT autonomously run E2E or promote.
 
+> **Architectural note:** Each group is run as one `topology-sprint` invocation; the main loop adjudicates HITL gates between groups, fires integration checkpoints across group boundaries, and pivots cross-project when blocked. This is Workflow pattern 5 — **workflow-per-group + main-loop HITL adjudication**: the group loop belongs in the main agent loop; deterministic per-group execution is delegated to `topology-sprint`; the main loop owns every pivot, every amendment, and the E2E/promote stop. A single script spanning all groups cannot pause for a contract amendment, a `strict`-mode DL approval, or a cross-project pivot decision — those are human boundaries. See `{COMMANDS_DIR}/topology-PRINCIPLES.md` § Workflow patterns.
+
 ## Usage
 
 ```
@@ -9,6 +11,7 @@ Chain sprints across multiple groups (and optionally projects). Writes an overar
 /topology-autopilot <project-name> --through-group <N>
 /topology-autopilot <project-name> --cross-project
 /topology-autopilot <project-name> --through-group <N> --parallel
+/topology-autopilot <project-name> --resume <runId>
 /topology-autopilot --cross-project                       # auto-detects active projects
 ```
 
@@ -17,8 +20,9 @@ Chain sprints across multiple groups (and optionally projects). Writes an overar
 - `<project-name>` — project to autopilot; omit if `--cross-project` and you want auto-detection across all active projects
 - `--through-group <N>` — stop after Group N (default: run until all groups verified)
 - `--cross-project` — enable pivots to other projects when this one blocks; auto-detect project list from `{PROJECTS_ACTIVE_DIR}/`
-- `--parallel` — pass `--parallel` to each underlying `topology-sprint` invocation
+- `--parallel` — pass `--parallel` to each underlying `topology-sprint` invocation (worktree-per-category dispatch inside each sprint)
 - `--autonomy <strict|normal>` — default `strict`; passed to sprints
+- `--resume <runId>` — resume a paused autopilot at the group that blocked, using the recorded sprint runId for that group
 {{#if MULTI_AGENT}}
 - `{DELEGATE_FLAG}` — propagate {DELEGATE_AGENT_NAME} pair mode to every underlying `topology-sprint` invocation
 {{/if}}
@@ -55,6 +59,12 @@ Strip `{DELEGATE_FLAG}` from `$ARGUMENTS` before substituting into the positiona
 ---
 
 {{/if}}
+## Why autopilot stays a main-loop orchestrator (not one big workflow)
+
+A single workflow spanning all groups cannot pause for a contract amendment, a `strict`-mode DL approval, or a cross-project pivot decision — those are human boundaries, and a workflow's agents run to completion. So topology-autopilot keeps the **group loop in the main agent loop** and delegates only the deterministic per-group execution to `topology-sprint` (optionally as a Workflow script when the Workflow tool is available). Between groups, the main loop has the full picture and makes the human-facing calls. This is the deliberate division from PRINCIPLES: *deterministic work in the script, judgment in the loop.*
+
+---
+
 ## Instructions
 
 ### Step 1: Scope resolution
@@ -126,56 +136,94 @@ Only present in cross-project mode; fires if primary blocks
 - Every category targeted has Verified ✓ in VERIFICATION-TABLE
 - Every group has an integration checkpoint (CP1, CP2, ...)
 - Cross-project (if enabled) has a final cross-project integration doc
-- All commits pushed per PUSH_POLICY
+- Every group's branch landed via PR through `/topology-merge` (never merged into local main); local main == origin/main
 - Git working tree clean across all touched project worktrees
+
+## Workflow runIds (fill in as each sprint runs)
+
+| Group | Sprint plan id | Sprint runId | Status |
+|-------|---------------|--------------|--------|
+| 1     | <plan-id>     | <runId>      | pending |
+| 2     | <plan-id>     | <runId>      | pending |
 
 ## Resumption
 
-If paused by HITL: one checkpoint file at `<autopilot-dir>/CHECKPOINT.md`.
-Resume with `/topology-resume <primary-project>` after HITL decisions resolved.
+If paused by HITL: one checkpoint file at `<autopilot-dir>/CHECKPOINT.md` recording the sprint runId for the blocked group.
+Resume with `/topology-autopilot <primary-project> --resume <runId>` after HITL decisions resolved.
 ```
 
 ### Step 3: Preflight (aggregated across all projects in scope)
 
+- **Divergence guard (run first)** — `git fetch origin`, then `git rev-list --count origin/main..main`. If > 0, STOP the entire autopilot: local main has drifted from origin/main and must be reconciled before any sprint runs. See `{COMMANDS_DIR}/topology-PRINCIPLES.md` § Git & PR coordination.
 - All primary project preflight checks (same as topology-sprint Step 2)
 - For each pivot-target project: TOPOLOGY-CLAUDE exists, CONTRACT-SHEET exists, no active sprint
 - For cross-project: verify no file-level overlap between projects' Parallel Groups (should be none by design, but verify)
 - Git working tree clean in all relevant worktrees
 
-### Step 4: Execute sprint loop
+> **All sprint worktrees are created off fresh `origin/main` (fetch first), never local main, and every group lands via PR through `/topology-merge` — autopilot never `git merge`s into local main.** See PRINCIPLES § Git & PR coordination.
 
-Main loop:
+### Step 4: Execute the group loop
+
+The group loop lives in the main agent loop. Each group is one `topology-sprint` invocation (optionally a deterministic Workflow script when the Workflow tool is available). Structured `CATEGORY_RESULT[]` returned from each sprint drive the adjudication logic below.
 
 ```
 for group_index in 1..through_group:
     sprint_plan_id = call /topology-sprint-plan <primary-project> --group <group_index>
     result = call /topology-sprint <primary-project> --plan <sprint_plan_id>
+             # result = { runId, categoryResults: CATEGORY_RESULT[] }
+    record runId in AUTOPILOT-<id>.md Workflow-runIds table
 
-    if result.status == complete:
+    if every category in result is 'verified':
+        # cross-group integration if this group shares seams with the prior group
+        if group_index > 1 and cross_group_seams_exist(group_index-1, group_index):
+            call /topology-integrate <primary-project>
+        update AUTOPILOT-<id>.md
         continue
-    if result.status == paused-hitl:
-        if --cross-project and pivot_target_has_ready_work():
+
+    if any category is 'needs-hitl':
+        # ADJUDICATE in the main loop — never inside the sprint workflow
+        adjudicate(result.needs_hitl)   # see Step 5
+        if resolved:
+            # resume the SAME sprint workflow; cached stages return instantly
+            result = call /topology-sprint <primary-project> --resume <result.runId>
+            re-evaluate this group_index (do not advance until verified)
+        elif --cross-project and pivot_target_has_ready_work():
             log pivot in AUTOPILOT-<id>.md
-            pivot_result = autopilot_fragment(pivot_target)
+            pivot_result = autopilot_fragment(pivot_target)   # see Step 6
             if pivot_result.status == complete AND primary_dep_unblocked():
-                continue main loop at current group_index
+                result = call /topology-sprint <primary-project> --resume <result.runId>
+                re-evaluate group_index
             else:
                 exit with status paused-hitl
         else:
-            exit with status paused-hitl
-    if result.status == aborted:
+            exit with status paused-hitl   # write CHECKPOINT.md with the sprint runId
+
+    if any category is 'aborted':
         exit with status aborted
 ```
 
-Between groups, invoke cross-group integration (if groups share seams):
+**Prose-mode path (when Workflow tool is unavailable):** Run the same logic sequentially: call `/topology-sprint-plan`, then `/topology-sprint`, interpret the written VERIFICATION-TABLE and CHECKPOINT updates as the structured result equivalent, and adjudicate manually using the same Step 5 table.
 
-```
-if group_index > 1 and cross_group_seams_exist(group_index-1, group_index):
-    invoke /topology-integrate <primary-project>
-    update AUTOPILOT-<id>.md
-```
+### Step 5: HITL adjudication (main loop — never inside a sprint)
 
-### Step 5: Cross-project pivot logic
+For each `needs-hitl` category, branch on `hitl.reason`:
+
+| `hitl.reason` | Adjudication |
+|---|---|
+| `dl-entry-proposed-strict-mode` | Surface the proposed DL; in `strict` get explicit user approval via `/topology-decide`, in `normal` auto-add with rationale and continue. |
+| `contract-amendment-proposed` | **Always** surface to user; on approval, update CONTRACT-SHEET/SYSTEM-TOPOLOGY via a DL, then resume. |
+| `seam-amendment-proposed` | Same as contract-amendment; seam changes are always user-confirmed. |
+| `material-drift` | Re-run the affected category's upstream analysis (the sprint's `--resume` re-enters its Analyze stage); do not patch inline. |
+| `implementation-retry-exhausted` | Surface the failure detail; user fixes or redirects, then resume. |
+| `precommit-hook-unknown-failure` | Surface for user diagnosis; do not bypass hooks. Resume after fix. |
+| `verification-architectural-failure` | Surface; the issue is likely an unresolved DL or contract gap — resolve via `/topology-decide`, then resume. |
+| `external-dep-unreachable` | Canonical cross-project pivot trigger when `--cross-project` is set (Step 6); else pause. |
+| `security-sensitive-change` | Surface for explicit review before the branch lands; do not auto-approve. |
+| `scaffolding-incomplete` | Re-run `/topology-phase-plan` for the category (its prep-scaffolding gate is mandatory), then resume. |
+
+Record every adjudication decision in `AUTOPILOT-<id>.md`.
+
+### Step 6: Cross-project pivot logic
 
 When primary sprint pauses and `--cross-project`:
 
@@ -186,18 +234,18 @@ When primary sprint pauses and `--cross-project`:
 4. Reject pivot targets that would themselves depend on the primary's blocker
 
 **Pivot execution:**
-1. Write checkpoint for primary at `<primary-autopilot-dir>/CHECKPOINT.md` with status `paused-cross-project-pivot`
+1. Write checkpoint for primary at `<primary-autopilot-dir>/CHECKPOINT.md` with `status: paused-cross-project-pivot` + the sprint `runId`
 2. Run a fresh autopilot fragment: `/topology-autopilot <pivot-target>` with scope constrained to ready categories
 3. When pivot fragment completes or blocks itself, return control to primary
-4. If primary's blocker was external and now resolved (checked via heuristic), auto-resume primary without HITL
+4. If primary's blocker was external and now resolved (checked via heuristic), auto-resume primary using the recorded sprint `runId`
 
 **Pivot-back:**
 After pivot fragment reaches its own natural boundary (one group verified, one project complete, or its own HITL gate):
 1. Check if primary's blocker is resolved (e.g., DL entry approved via `topology-decide`)
-2. If yes: auto-resume primary with `/topology-resume`
+2. If yes: resume primary sprint via its `runId` using `--resume`
 3. If no: exit with combined status `paused-hitl (primary) + pivot-target status`
 
-### Step 6: Stop gates
+### Step 7: Stop gates
 
 Autopilot stops (not pauses) at these boundaries:
 
@@ -205,13 +253,13 @@ Autopilot stops (not pauses) at these boundaries:
 
 **Through-group ceiling:** reached `--through-group N`. Report and exit with status `reached-ceiling`.
 
-**E2E readiness boundary:** if the project's recommended next step is `topology-e2e` (extracting runtime tests and moving to e2e/), autopilot stops and reports. `topology-e2e` is human-initiated.
+**E2E readiness boundary:** if the project's recommended next step is `topology-e2e` (extracting runtime tests and moving to `{PROJECTS_E2E_DIR}/`), autopilot stops and reports. `topology-e2e` is human-initiated.
 
 **Promotion boundary:** if the project's recommended next step is `topology-promote` (synthesize to tier docs, archive), autopilot stops. Always human-initiated.
 
 **Unrecoverable HITL:** HITL gate with no cross-project pivot available.
 
-### Step 7: Autopilot completion report
+### Step 8: Autopilot completion report
 
 Write `<autopilot-dir>/AUTOPILOT-COMPLETE.md` with aggregated state:
 
@@ -232,6 +280,13 @@ duration: <HH:MM>
 - Duration: <HH:MM>
 
 ### Sprint N — ...
+
+## Workflow runIds (for resume)
+
+| Group | runId | Status |
+|-------|-------|--------|
+| 1     | <id>  | verified |
+| 2     | <id>  | paused-hitl |
 
 ## Cross-project pivots (if any)
 - <ISO> — primary <project> paused for <reason>; pivoted to <other-project>
@@ -261,11 +316,13 @@ Emit to user. Autopilot done.
 
 ## Important Notes
 
+- **The group loop is main-loop; the per-group execution is a sprint (optionally a workflow).** This is the load-bearing design choice. Do not fold the whole autopilot into one workflow — it would lose the ability to adjudicate amendments and pivots.
+- **HITL is adjudicated between groups, never inside a sprint workflow.** A sprint returns `needs-hitl` as data (or writes CHECKPOINT.md in prose mode); the autopilot main loop decides, then resumes the same sprint via its `runId` (cached stages return instantly in Workflow mode).
 - **Autopilot auto-calls sprint-plan.** You don't run `/topology-sprint-plan` before an autopilot — it happens implicitly per group. You CAN run it first if you want to review a specific group's predicted gates before committing to autopilot.
 - **Cross-project is opt-in.** The default is single-project. Turn on only when you want the agent to pivot on its own inference — this is highest risk of scope creep if misjudged.
-- **E2E and promote are always HITL.** Autopilot stops at these boundaries unconditionally. This is the hard line that autopilot cannot cross.
-- **Autopilot can chain with itself.** If autopilot pauses for HITL, you resolve the gate, then `/topology-resume` brings you back into the autopilot. It's not a new autopilot run.
-- **Autopilot scope is the project level.** It chains sprints and (optionally) pivots across projects; it never operates below the project boundary.
+- **E2E and promote are the hard line.** Autopilot stops unconditionally at these boundaries. This must never be relaxed.
+- **Autopilot chains with itself.** If autopilot pauses for HITL, you resolve the gate, then `/topology-autopilot <project> --resume <runId>` brings you back into the autopilot. It's not a new autopilot run — the recorded sprint runId means already-completed stages return from cache (Workflow mode) or from the written verification state (prose mode).
+- **Worktrees off fresh `origin/main`, land via PR.** Every group's parallel categories isolate in worktrees; landing is exclusively `/topology-merge` → PR. The divergence guard runs before the whole autopilot and local main never accumulates feature commits.
 
 ---
 
@@ -275,5 +332,7 @@ Emit to user. Autopilot done.
 |-------------|-------------|
 | `<primary-project>` | First/primary project |
 | `<id>` | `autopilot-<YYYYMMDD-HHMM>-<primary>-<scope>` |
-| `<autopilot-dir>` | `{PROJECTS_ACTIVE_DIR}/<primary>/autopilot/<id>/` |
+| `<autopilot-dir>` | `{PROJECTS_ACTIVE_DIR}/<primary>/autopilot/` |
 | `<other-project>` | Cross-project pivot target |
+
+$ARGUMENTS

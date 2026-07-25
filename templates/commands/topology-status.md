@@ -1,16 +1,23 @@
 # topology-status
 
-Read-only dashboard. Renders the current state of the entire topology project — verification table, category progress, seam health, open regressions, and next recommended actions. No files are created or modified.
+Read-only dashboard. Renders the current state of the entire topology project — verification table, category progress, seam health, open regressions, **in-flight resumable Workflow runs**, and next recommended actions. No files are created or modified.
+
+> **See `{COMMANDS_DIR}/topology-PRINCIPLES.md`** for the design discipline, the foundation-document mutation discipline (which this command only *reads*, never mutates), and the resume discipline — when Workflow-era orchestration is in use, every `topology-*` orchestration workflow returns a `runId`, and a HITL exit leaves that run resumable via `resumeFromRunId`. This dashboard's In-Flight Workflows section surfaces those runIds so the user knows what can be picked back up.
 
 ## Usage
 
 ```
 /topology-status <project-name>
+/topology-status <project-name> --parallel    # fan out one read-only Explore agent per category for a faster scan
 ```
 
 ### Arguments
 
 - `<project-name>` — the project directory name under `{PROJECTS_ACTIVE_DIR}/`
+
+### Flags
+
+- `--parallel` — optional. Fan out read-only `Explore` agents (one per category) to summarize each category's stage in parallel, then render the same dashboard from their compact returns. Pure speed optimization; the dashboard output is identical to the sequential read. Omit it and status works as a simple sequential read.
 
 ---
 
@@ -38,6 +45,9 @@ Read every document that exists (skip gracefully if not yet created):
 7. All `categories/<slug>/` — check which stage each category has reached
 8. All `integration-checkpoints/` — read the most recent one
 9. For any category with a VERIFICATION-REPORT.md, note the outcome
+10. Any `CHECKPOINT.md` files (autopilot/sprint state) — read them for in-flight Workflow runIds (see Step 5)
+
+> **Optional parallel scan (`--parallel`):** instead of reading each `categories/<slug>/` directory inline, dispatch one read-only `Explore` agent per category with the prompt "Report the current stage of topology category `<slug>` in project `<project>`: which of {Not Started, Current State Documented, Gap Analysis Complete, Phase Plan Complete, Future State Documented, Implementation In Progress, Implementation Complete, Verification Pass, Verification Failed} it has reached, the phase count if in implementation (e.g. 2/4), and the VERIFICATION-REPORT outcome if present. Return a compact one-line status slice." Render the returned slices in the Category Status section. This is read-only and changes nothing about the output — it only parallelizes the scan. Keep it light: one agent per category, no fan-out beyond that.
 
 ### Step 2: Build Category Status Map
 
@@ -79,17 +89,32 @@ For each seam in `SYSTEM-TOPOLOGY.md`, determine current health:
 - **Open regressions:** Count of Regression seams
 - **Categories blocked:** Categories whose dependencies haven't cleared yet
 
-### Step 5: Identify Next Actions
+### Step 5: Detect In-Flight Resumable Workflow Runs
+
+When Workflow-era orchestration is in use, topology-sprint, topology-autopilot, and topology-dispatch each run as `Workflow` scripts that return a `runId` and exit cleanly on any human-in-the-loop (HITL) gate (see PRINCIPLES — "the HITL boundary lives in the main loop"). When that happens, the responsible command records the `runId` (and the gate that stopped it) in a `CHECKPOINT.md` for cross-session recovery.
+
+Scan for these CHECKPOINT files (e.g. `autopilot/CHECKPOINT.md`, `sprints/<id>/CHECKPOINT.md`, or any `CHECKPOINT.md` under the project). For each, extract:
+- The Workflow `runId`
+- Which command authored it (sprint / autopilot / dispatch)
+- The HITL `reason` that paused it (e.g. `contract-amendment-proposed`, `implementation-retry-exhausted`)
+- The category/group it stopped on, and the date
+
+These are the runs `/topology-resume` can pick back up. A run with no recorded resolution is **resumable**; a run whose gate has been adjudicated but not yet re-invoked is **ready to resume**. Surface both in the dashboard. If no CHECKPOINT files exist, the section shows "None — no in-flight workflows."
+
+If the project is not using Workflow-era orchestration, this step is a no-op and the section shows "None — no in-flight workflows."
+
+### Step 6: Identify Next Actions
 
 Based on current state, recommend the next actions in priority order:
 
-1. **Regressions** — if any seam is in Regression state, this is the top priority
-2. **Ready for verify** — categories with all phases complete but not yet verified
-3. **Ready for next phase** — categories in implementation with phases remaining
-4. **Ready to start** — categories in the recommended execution order whose dependencies are clear
-5. **Integration checkpoint due** — if 2-3 categories have verified since the last checkpoint
+1. **In-flight workflow resume** — if any workflow run is paused at a resolved HITL gate, resuming it is the top priority (the deterministic work is already cached; only the unblocked branch re-runs)
+2. **Regressions** — if any seam is in Regression state, this is the top priority among code work
+3. **Ready for verify** — categories with all phases complete but not yet verified
+4. **Ready for next phase** — categories in implementation with phases remaining
+5. **Ready to start** — categories in the recommended execution order whose dependencies are clear
+6. **Integration checkpoint due** — if 2-3 categories have verified since the last checkpoint
 
-### Step 6: Render Dashboard
+### Step 7: Render Dashboard
 
 Output a structured dashboard:
 
@@ -110,6 +135,18 @@ OPEN ISSUES
   🔵 Pending verify:     <N>
 
 ───────────────────────────────────────────────────────────
+IN-FLIGHT WORKFLOWS (resumable)
+───────────────────────────────────────────────────────────
+
+  ⏸  <command> run <runId>
+       Paused at: <hitl-reason> on <category-or-group> (<date>)
+       Status:    AWAITING ADJUDICATION | READY TO RESUME
+       Resume:    /topology-resume <project-name> --run <runId>
+
+  <or, if none:>
+  ○  None — no in-flight workflows.
+
+───────────────────────────────────────────────────────────
 CATEGORY STATUS
 ───────────────────────────────────────────────────────────
 
@@ -125,27 +162,21 @@ CATEGORY STATUS
 SEAM HEALTH
 ───────────────────────────────────────────────────────────
 
-  ✓  S1 — Model Resolution → Execution          Both verified
-  ✓  S2 — Proto Boundary → Billing              Both verified
-  ⏳  S3 — Proto Boundary → Artifact Runtime     Producer verified, consumer in progress
-  ○  S4 — Billing → Session State               Producer verified, consumer not started
-  ○  S5 — Artifact Runtime → Execution          Not active
-  ○  S6 — HITL → Session State                  Not active
-  ○  S7 — Context Budget → Execution            Not active
-  ○  S8 — Frontend Status → UI Components       Not active
+  ✓  S1 — <seam-title-a> → <seam-title-b>       Both verified
+  ✓  S2 — <seam-title-c> → <seam-title-d>       Both verified
+  ⏳  S3 — <seam-title-e> → <seam-title-f>       Producer verified, consumer in progress
+  ○  S4 — <seam-title-g> → <seam-title-h>       Producer verified, consumer not started
+  ○  S5 — <seam-title-i> → <seam-title-j>       Not active
 
 ───────────────────────────────────────────────────────────
 CONTRACT STATUS
 ───────────────────────────────────────────────────────────
 
-  ✓  C1 — Unified Session Primitive             Verified
-  ✓  C2 — Single Model Resolution Cascade       Verified
-  ⏳  C3 — Single Billing Event Emission         In progress
-  ○  C4 — Typed Artifact Contract               Not started
-  ○  C5 — Context Budget Enforcement            Not started
-  ○  C6 — Checkpoint-Resume HITL               Not started
-  ⏳  C7 — Typed gRPC Event Boundary            In progress
-  ○  C8 — Frontend Status Authority             Not started
+  ✓  C1 — <contract-title-a>                    Verified
+  ✓  C2 — <contract-title-b>                    Verified
+  ⏳  C3 — <contract-title-c>                    In progress
+  ○  C4 — <contract-title-d>                    Not started
+  ○  C5 — <contract-title-e>                    Not started
 
 ───────────────────────────────────────────────────────────
 LAST INTEGRATION CHECKPOINT
@@ -171,6 +202,10 @@ RECOMMENDED NEXT ACTIONS
 ───────────────────────────────────────────────────────────
 
   <Priority-ordered list of what to do next>
+
+  <If a workflow is paused at a resolved gate:>
+  ⏸ 0. Resume in-flight workflow (<command>, gate <hitl-reason> resolved)
+        /topology-resume <project-name> --run <runId>
 
   <If regressions:>
   🔴 1. Fix regression in <category> (S<N> seam)
@@ -209,9 +244,10 @@ RECOMMENDED NEXT ACTIONS
 
 ## Important Notes
 
-- **Read-only** — this command never creates, modifies, or deletes any file. If it appears to need to update something, that update belongs in another command.
-- **Graceful degradation** — if some documents don't exist yet (early in the project), skip them and reflect their absence in the status output. Do not fail.
-- **Recommended actions are ordered by impact** — regressions always come first. A regression in a verified category is more urgent than advancing an unstarted category.
-- **Use frequently** — this command is cheap (read-only) and provides the clearest picture of where the project stands. Run it at the start of any session to re-orient.
+- **Read-only** — this command never creates, modifies, or deletes any file. If it appears to need to update something, that update belongs in another command. The optional `--parallel` `Explore` agents are search-only and write nothing.
+- **Graceful degradation** — if some documents don't exist yet (early in the project), skip them and reflect their absence in the status output. Do not fail. A project with no CHECKPOINT files simply shows "None" under In-Flight Workflows.
+- **Recommended actions are ordered by impact** — a resumable workflow at a resolved gate comes first (its deterministic work is already cached, so resuming is the cheapest forward motion), then regressions. A regression in a verified category is more urgent than advancing an unstarted category.
+- **In-flight runIds are sourced, never invented** — only surface a `runId` that actually appears in a CHECKPOINT file. If a CHECKPOINT references a run but its gate adjudication is ambiguous, show it as AWAITING ADJUDICATION rather than guessing it is ready.
+- **Use frequently** — this command is cheap (read-only) and provides the clearest picture of where the project stands. Run it at the start of any session to re-orient, especially to see which Workflow runs are mid-flight and resumable.
 
 $ARGUMENTS

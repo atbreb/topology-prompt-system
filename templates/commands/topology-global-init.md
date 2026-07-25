@@ -4,6 +4,8 @@ Stand up the three global topology documents for the first time. Reads existing 
 
 Run once. After this, `topology-promote` maintains the global layer automatically on every project completion.
 
+> **Workflow-era addition (Step 1.5):** When `--from-projects` is supplied and there are many archived/e2e projects to read (rule of thumb: 4+), an optional deterministic Workflow script can fan out one read-only agent per project to extract each project's contribution to the global indices in parallel, then return structured extracts to the main loop for assembly. The interview is unchanged — it stays in the main loop, single-author, exactly as in the original. Invoking this command is the explicit user opt-in that authorizes the Workflow. See Step 1.5 for full details and the script.
+
 ## Usage
 
 ```
@@ -16,7 +18,7 @@ Run once. After this, `topology-promote` maintains the global layer automaticall
 ### Arguments
 
 - No flags — interview only, no pre-reading. Builds from conversation.
-- `--from-projects` — read all archived project topology docs before interviewing
+- `--from-projects` — read all archived and e2e project topology docs before interviewing
 {{#if TIER_ENABLED}}- `--from-tiers` — read all tier docs before interviewing
 - Both flags together — read everything available, then interview against the gaps and ambiguities found{{/if}}
 
@@ -56,7 +58,7 @@ If `GLOBAL-CONTRACTS.md`, `GLOBAL-TOPOLOGY.md`, or `GLOBAL-DECISIONS.md` already
 
 ### Step 1: Read All Source Material
 
-If `--from-projects` is provided, read every project in `{PROJECTS_ARCHIVE_DIR}/`:
+If `--from-projects` is provided, read every project in `{PROJECTS_ARCHIVE_DIR}/` (and any verified projects in `{PROJECTS_E2E_DIR}/`):
 - `CONTRACT-SHEET.md` — contracts and their verification status
 - `SYSTEM-TOPOLOGY.md` — seam contracts
 - `DECISION-LOG.md` — project decisions
@@ -78,6 +80,99 @@ Also note:
 - Anything contradictory between sources
 - Anything that appears in docs but feels aspirational rather than real
 - Anything conspicuously absent — categories with no seams, seams with no contracts, large areas of the system with no documentation at all
+
+---
+
+### Step 1.5: Optional — Parallel Per-Project Extraction (Read-Only Workflow)
+
+This step applies **only** when `--from-projects` is supplied and there are enough archived/e2e projects that reading them serially would be slow (rule of thumb: 4+). Otherwise read them serially in Step 1 and skip this step entirely.
+
+When it applies, fan out **one read-only agent per project** via a deterministic Workflow script to extract each project's contribution to the global indices. The main loop then assembles the combined draft from those structured extracts. Each agent reads a single project's foundation and verification docs and returns a compact structured extract; it writes nothing.
+
+> **Why fan-out here is safe.** Each agent reads one project's docs and mutates nothing — no global doc, no project doc, no git state. There is no shared-file contention and no decision to adjudicate, so there is no HITL boundary inside the workflow. The workflow returns per-project extracts; the **main loop alone** assembles them into the draft (Step 1) and then runs the interview (Steps 2–7) and authors the canonical global docs (Step 9). Single-author synthesis is preserved — the workflow only gathers.
+
+Author the script below (filling the project list and doc-root paths into `args`) and call the `Workflow` tool. Invoking this command is the opt-in.
+
+```js
+export const meta = {
+  name: 'topology-global-init-extract',
+  description: 'Fan out one read-only agent per archived/e2e project to extract its contribution to the global indices',
+  phases: [
+    { title: 'Extract', detail: 'one agent per project reads its foundation+verification docs and returns a structured contribution; writes nothing' },
+  ],
+}
+
+// --- inline schema for this command's structured return ---
+// One project's verified contribution to the platform-wide global indices.
+const PROJECT_EXTRACT = {
+  type: 'object',
+  required: ['project', 'contracts', 'seams', 'decisions'],
+  properties: {
+    project: { type: 'string' },                       // project slug
+    location: { enum: ['archive', 'e2e'] },             // where it was read from (affects confidence)
+    contracts: { type: 'array', items: { type: 'object', required: ['claim', 'status'], properties: {
+      sourceId:     { type: 'string' },                  // the project-local id, e.g. "C3"
+      claim:        { type: 'string' },                  // the invariant, stated as an always-true fact
+      governs:      { type: 'string' },                  // subsystems/categories it governs
+      status:       { enum: ['Verified', 'Proposed', 'Unverified'] },  // per the project's VERIFICATION-REPORT
+      platformWide: { type: 'boolean' },                 // agent's read: does this look platform-wide or project-scoped?
+    }}},
+    seams: { type: 'array', items: { type: 'object', required: ['producer', 'consumer', 'crosses', 'status'], properties: {
+      sourceId:           { type: 'string' },
+      producer:           { type: 'string' },
+      consumer:           { type: 'string' },
+      crosses:            { type: 'string' },            // what crosses the boundary (typed)
+      producerGuarantees: { type: 'string' },
+      consumerDepends:    { type: 'string' },
+      status:             { enum: ['Verified', 'Proposed', 'Archived'] },
+    }}},
+    decisions: { type: 'array', items: { type: 'object', required: ['title', 'summary'], properties: {
+      sourceId:     { type: 'string' },                  // e.g. "DL-007"
+      title:        { type: 'string' },
+      summary:      { type: 'string' },
+      rationale:    { type: 'string' },
+      platformWide: { type: 'boolean' },                 // agent's read: platform-wide implication, or project-local?
+    }}},
+    contradictions: { type: 'array', items: { type: 'string' } },  // anything that conflicts or reads as aspirational
+    notes: { type: 'string' },
+  },
+}
+
+const { projects, projectsArchiveDir, projectsE2eDir } = args
+// projects:          [{ slug, location }]  where location is 'archive' | 'e2e'
+// projectsArchiveDir: "{PROJECTS_ARCHIVE_DIR}/"
+// projectsE2eDir:    "{PROJECTS_E2E_DIR}/"
+
+phase('Extract')
+const extracts = await parallel(
+  projects.map(p => () => agent(
+    `You are extracting ONE completed topology project's contribution to the PLATFORM-WIDE global topology indices. ` +
+    `You are READ-ONLY: read the docs and return structured data. Do NOT write or edit any file.\n\n` +
+    `Project: ${p.slug}  (location: ${p.location})\n` +
+    `Project root: ${p.location === 'archive' ? projectsArchiveDir : projectsE2eDir}${p.slug}/\n\n` +
+    `Read whichever of these exist:\n` +
+    `- CONTRACT-SHEET.md — invariants + their verification status\n` +
+    `- SYSTEM-TOPOLOGY.md — seam contracts (producer guarantees / consumer expectations)\n` +
+    `- DECISION-LOG.md — decisions + rationale\n` +
+    `- any VERIFICATION-REPORT.md — what actually PASSED vs. what was only Proposed\n\n` +
+    `EXTRACTION RULES (this is a draft for a human interview, not the final doc — bias toward surfacing, not pruning):\n` +
+    `- A contract's status must reflect the VERIFICATION-REPORT, not the CONTRACT-SHEET's optimistic header. ` +
+    `If a contract was Proposed but never shown to pass, mark it Proposed, not Verified.\n` +
+    `- For each contract and decision, judge platformWide: does this constrain the WHOLE platform, or only this project's subsystem? ` +
+    `When unsure, set platformWide:true and note your doubt — over-surfacing is recoverable; the interview prunes. A missed platform invariant is the failure mode this gather exists to prevent.\n` +
+    `- For seams, copy producer guarantees and consumer dependencies verbatim enough that the main loop can judge whether they were honored or aspirational.\n` +
+    `- Record every contradiction or anything that reads as aspirational rather than real in contradictions[] — these become interview probes.\n\n` +
+    `Return a PROJECT_EXTRACT. Write nothing.`,
+    { label: `extract:${p.slug}`, phase: 'Extract', schema: PROJECT_EXTRACT, agentType: 'Explore' }
+  ))
+)
+
+return extracts.filter(Boolean)
+```
+
+Pass `args: { projects, projectsArchiveDir, projectsE2eDir }`. The workflow returns a `runId` and an array of `PROJECT_EXTRACT`. The **main loop** folds these into the three draft lists from Step 1 (de-duplicating where multiple projects assert the same invariant or seam, keeping the highest-confidence source), preserving every `contradictions[]` note as an interview probe for Round 4 (Step 6). Do not write any global doc yet — the draft only feeds the interview.
+
+If the fan-out is skipped, the serial read in Step 1 produces the same draft lists; everything downstream is identical.
 
 ---
 
@@ -207,9 +302,9 @@ Then:
 > this platform, what would you tell them on day one that they wouldn't figure out
 > from reading the docs?
 
-Then, if anything suspicious came up during source material reading:
+Then, if anything suspicious came up during source material reading (including every `contradictions[]` note surfaced by the Step 1.5 fan-out, if run):
 
-> [Present each gap or contradiction found in Step 1.]
+> [Present each gap or contradiction found in Step 1 / Step 1.5.]
 > I noticed [description of gap or contradiction]. What's the real story there?
 
 Capture everything surfaced in this round. Some will become new contracts or seams. Some will become decisions. Some will become notes in the global docs about known unknowns. None of it gets discarded.
@@ -230,7 +325,7 @@ Wait for the response. Incorporate anything new.
 
 ### Step 8: Reconcile and Finalize Entry List
 
-Merge the draft from source material with everything learned in the interview. For each entry, assign a final status:
+Merge the draft from source material (Step 1 and the Step 1.5 extracts, if run) with everything learned in the interview. For each entry, assign a final status:
 
 **Contracts:**
 - `Active` — confirmed true today by the interview, formally verified by at least one completed project
@@ -259,6 +354,8 @@ For every entry, include a `Source` field noting where it came from:
 - `Verified by project <name>` — came from a completed topology project
 - `Interview-confirmed, not formally verified` — confirmed true in interview but no topology project has checked it
 {{#if TIER_ENABLED}}- `Seeded from tier docs — not interview-confirmed` — in docs but not discussed in interview (lowest confidence){{/if}}
+
+> **The three global docs are written by the main loop, single-author.** The Step 1.5 fan-out (if run) only gathered read-only extracts to feed the draft. Cross-project synthesis — deciding which invariants are truly platform-wide, reconciling contradictory project assertions, assigning canonical global IDs — demands one coherent voice and stays in the main loop. Do not delegate authoring of any global doc to a workflow agent.
 
 ---
 
@@ -293,7 +390,7 @@ topology-promote feeds them automatically after every project completes.
 - {DOCS_ROOT}/GLOBAL-DECISIONS.md
 
 ### Source Material Read
-- Archived projects: <N>
+- Archived/e2e projects: <N>   (extraction workflow runId: <runId or "n/a — serial read">)
 {{#if TIER_ENABLED}}- Tier doc files: <N>
 {{/if}}- Interview rounds: 4
 
@@ -323,10 +420,13 @@ beginning any new project interview.
 
 ## Important Notes
 
-- **The interview is not optional.** Docs lie — not intentionally, but inevitably. They describe what was true when written. The interview confirms what is true now. Skipping it produces a global layer that formalizes drift instead of correcting it.
-- **Confidence levels matter.** An `Active` entry with no interview confirmation is not the same as one that was verified in person. The `Source` field preserves this distinction permanently.
+- **The interview is not optional.** Docs lie — not intentionally, but inevitably. They describe what was true when written. The interview confirms what is true now. Skipping it produces a global layer that formalizes drift instead of correcting it. The Step 1.5 fan-out does NOT replace the interview — it only accelerates the read that feeds it.
+- **The global docs stay single-author.** Only the optional read-only per-project extraction (Step 1.5) fans out. Cross-project synthesis demands one coherent voice and stays in the main loop. Never delegate authoring of a global doc to a workflow agent.
+- **No HITL, no E2E/promote boundary inside the workflow.** The Step 1.5 workflow is a read-only gather — it writes nothing, adjudicates nothing, and crosses no boundary. The only human-in-the-loop work is the interview itself, which lives wholly in the main loop. Per the Workflow-era discipline in topology-PRINCIPLES, a Workflow script never encodes interview adjudication.
+- **Confidence levels matter.** An `Active` entry with no interview confirmation is not the same as one that was verified in person. The `Source` field preserves this distinction permanently. The extraction agents report a project's own verification status; the interview is what promotes an entry to interview-confirmed.
 - **Unverified entries are still valuable.** Flagging something as unverified is not a failure — it is a finding. It marks the boundary of what is known and creates a target for future topology work.
 - **Round 4 is where the most important knowledge surfaces.** The first three rounds work from what exists. Round 4 surfaces what nobody wrote down. Don't skip it or rush it.
 - **Run once.** After this, `topology-promote --execute` maintains all three documents. Do not re-run `topology-global-init`.
+- **Workflow scripts must avoid `Date.now()` / `Math.random()` / `new Date()`** — they break deterministic resume. The run date is stamped by the main loop after the workflow returns, never inside the Step 1.5 script (see topology-PRINCIPLES § Resume discipline).
 
 $ARGUMENTS

@@ -4,6 +4,8 @@ Run the four-step planning walk (`topology-current-state` → `topology-gap` →
 
 This is the planning-phase analog to `topology-sprint`. After this command completes for a group, every category in the group is in state **"Future State Documented — ready for /topology-implement."**
 
+> **See `{COMMANDS_DIR}/topology-PRINCIPLES.md`** for the design discipline and the shared schema library. In particular: the five failure modes each step mitigates (Part I); the foundation-document mutation discipline (CURRENT-STATE / GAP-ANALYSIS / FUTURE-STATE are per-category outputs, the foundation docs are append-only-via-DL); and the absolute HITL boundary (Part II — "what runs in a workflow vs. what stays in the main loop"). This command is a planning **orchestrator**, not a canonical mutator: it sequences the four planning commands, and any `Workflow` it embeds is **strictly read-only** (no file writes, no canonical mutation, no project move).
+
 ## Usage
 
 ```
@@ -122,7 +124,7 @@ Do not pause for confirmation — the user explicitly invoked the walk. The plan
 
 For each category in the list whose status is `not-walked`:
 
-1. Invoke `/topology-current-state <project-name> <category-slug>`.
+1. Invoke `/topology-current-state <project-name> <category-slug>`{{#if MULTI_AGENT}} (with `{DELEGATE_FLAG}` if propagating){{/if}}.
 2. Capture the completion report.
 3. Note any "Requires Manual Review" items for the consolidated report.
 
@@ -135,7 +137,7 @@ After all categories complete this step, print a single-line status:
 
 For each category in the list whose status is `current-state-done` (or that just transitioned from `not-walked` in Step 3):
 
-1. Invoke `/topology-gap <project-name> <category-slug>`.
+1. Invoke `/topology-gap <project-name> <category-slug>`{{#if MULTI_AGENT}} (with `{DELEGATE_FLAG}` if propagating){{/if}}.
 2. Capture the completion report.
 3. Aggregate "Decisions Required Before topology-phase-plan" entries — these become flagged DL items in the final report.
 4. Aggregate "Critical gaps" and "Unblocking Priority" — these inform the cross-category dependency view.
@@ -150,8 +152,8 @@ After all categories complete this step, print:
 
 For each category in the list whose status is `gap-done` (or that just transitioned in Step 4):
 
-1. Invoke `/topology-phase-plan <project-name> <category-slug>`.
-   - `topology-phase-plan` Step 4 invokes `/project-prep-scaffolding` internally to scaffold per-phase directories with session prompts and runbooks. The walk does not invoke prep-scaffolding directly.
+1. Invoke `/topology-phase-plan <project-name> <category-slug>`{{#if MULTI_AGENT}} (with `{DELEGATE_FLAG}` if propagating){{/if}}.
+   - `topology-phase-plan` Step 4 invokes `/project-prep-scaffolding` internally to scaffold per-phase directories with session prompts and runbooks. The walk does not invoke prep-scaffolding directly. This scaffolding gate is mandatory and non-skippable (per `topology-PRINCIPLES.md` Part I anti-patterns — the slim-mirror `implementation/CLAUDE.md` substitute is refused).
 2. Capture the completion report.
 3. **Verify scaffolding outputs on disk before declaring this category's phase-plan step complete.** Do not trust the agent's completion report — list the implementation directory and confirm the artifacts exist:
 
@@ -168,7 +170,7 @@ For each category in the list whose status is `gap-done` (or that just transitio
 
    If any artifact is missing — including the case where only a slim `implementation/CLAUDE.md` mirror was written — **halt the entire walk**. Do not proceed to Step 6 (future-state) for any category. Do not silently accept the slim-mirror anti-pattern. Report:
 
-   > ❌ Walk HALTED at Step 5 for `<slug>`: phase-plan completed without scaffolding (`<missing files>`). The slim-mirror substitute is a known anti-pattern. Fix: re-invoke `/topology-phase-plan <project-name> <slug>` and ensure its Step 4 verification passes before resuming the walk with `/topology-doc-walk <project-name> ...`.
+   > ❌ Walk HALTED at Step 5 for `<slug>`: phase-plan completed without scaffolding (`<missing files>`). The slim-mirror substitute is an anti-pattern (see `topology-PRINCIPLES.md` Part I "Anti-patterns to refuse"). Fix: re-invoke `/topology-phase-plan <project-name> <slug>` and ensure its Step 4 verification passes before resuming the walk with `/topology-doc-walk <project-name> ...`.
 
 4. Aggregate phase counts and total estimated effort across the batch (only after every category's verification passes).
 
@@ -181,9 +183,9 @@ After all categories complete this step **and pass on-disk verification**, print
 
 For each category in the list whose status is `phase-plan-done` (or that just transitioned in Step 5):
 
-1. Invoke `/topology-future-state <project-name> <category-slug>`.
+1. Invoke `/topology-future-state <project-name> <category-slug>`{{#if MULTI_AGENT}} (with `{DELEGATE_FLAG}` if propagating){{/if}}.
 2. Capture the completion report.
-3. Aggregate verification checklist sizes for the cross-category view.
+3. Aggregate verification checklist sizes for the cross-category view. (`topology-future-state` emits a structured assertion list that `topology-verify` consumes directly as its checklist — surface the assertion count here.)
 
 After all categories complete this step, print:
 > Step 4/4 (future-state) complete for <N>/<N> categories.
@@ -239,6 +241,15 @@ Pulled from each category's GAP-ANALYSIS.md "Cascade — Categories Blocked by T
 | Producer Category | Consumer Category | Cascade Description |
 |-------------------|-------------------|---------------------|
 
+### Coherence Audit
+
+> (Present only when the optional read-only coherence sweep ran — see below.)
+> Surface any critical/high findings here for main-loop decision. No fix is applied
+> by the sweep; the main loop decides and the doc-walk's sequential path lands anything warranted.
+
+| Doc | Coherence | Staleness | Coverage | Severity | Finding |
+|-----|-----------|-----------|----------|----------|---------|
+
 ### Files Created
 
 ```
@@ -266,16 +277,83 @@ categories/<slug-1>/
 
 ---
 
+## Optional: read-only coherence sweep (Workflow)
+
+Walking many docs is a read-heavy fan-out: each category's CURRENT-STATE / GAP-ANALYSIS / FUTURE-STATE / implementation plan, plus the foundation docs (CONTRACT-SHEET, SYSTEM-TOPOLOGY, DECISION-LOG), all need to be audited for **coherence, coverage, staleness, and cross-link integrity** once the walk has produced (or refreshed) them. A deterministic Workflow script — run read-only at the end of the walk — parallelizes this audit pass efficiently. It is **strictly read-only** and **OPTIONAL**. The doc-walk MUST still work as a purely sequential read with no Workflow at all; the sweep only accelerates the audit pass.
+
+**When to use it.** Run the sweep at the end of the walk (after Step 6, before or alongside Step 8) on multi-category modes (`--group`, `--categories`, `--all`) where there are enough docs that auditing them one-at-a-time in the main loop is wasteful. For a single-category walk, read the four outputs inline — no Workflow.
+
+**What it does.** Fan out one read-only agent **per doc** (or per tier, for very large projects) using `parallel()`. Each agent reads exactly one doc plus the foundation docs it must reconcile against, and returns a compact structured `DOC_FINDING`. The main loop assembles the findings into the walk report's Coherence Audit section and adjudicates anything flagged. **The Workflow writes nothing** — no file edits, no status flips, no project move. Any incoherence that warrants a fix is surfaced to the main loop as a finding; the main loop decides. This honors the absolute HITL/read-only boundary documented in `{COMMANDS_DIR}/topology-PRINCIPLES.md` Part II.
+
+**Invoking this walk command is the Workflow opt-in** — running `/topology-doc-walk` with the sweep scope authorizes this read-only script. Surface the doc list and scope to the user before a large sweep.
+
+```js
+export const meta = {
+  name: 'topology-doc-walk-coherence',
+  description: 'Read-only coherence/coverage/staleness/cross-link audit of the walked docs — NO writes',
+  phases: [
+    { title: 'Audit', detail: 'one read-only agent per doc returns a structured coherence finding' },
+  ],
+}
+
+// --- compact inline finding schema (doc-walk-local) ---
+const DOC_FINDING = {
+  type: 'object',
+  required: ['doc', 'coherence', 'staleness', 'crosslinks'],
+  properties: {
+    doc:         { type: 'string' },                                       // absolute path of the doc audited
+    tier:        { enum: ['current-state', 'gap', 'phase-plan', 'future-state', 'foundation'] },
+    coherence:   { enum: ['coherent', 'minor-drift', 'contradicts-foundation'] },
+    staleness:   { enum: ['fresh', 'stale-ref', 'stale-content'] },        // stale-ref = points at a renamed/removed artifact
+    coverage:    { enum: ['complete', 'gaps-noted', 'missing-section'] },  // does the doc cover what its template requires
+    crosslinks:  { enum: ['intact', 'broken-link', 'orphan'] },            // broken-link = points at a non-existent doc/anchor; orphan = nothing links here
+    findings:    { type: 'array', items: { type: 'object', properties: {
+      severity: { enum: ['critical', 'high', 'medium', 'low'] },
+      detail:   { type: 'string' },                                        // "file:line — what is wrong / what it contradicts"
+      fix:      { type: 'string' },                                        // suggested remediation for the MAIN LOOP (not executed here)
+    }}},
+    summary:     { type: 'string' },
+  },
+}
+
+const { project, docs } = args   // docs: [{ doc, tier, reconcileAgainst }]  reconcileAgainst = foundation doc paths to cross-check
+
+phase('Audit')
+const findings = await parallel(
+  docs.map(d => () => agent(
+    `You are running a READ-ONLY coherence audit for the topology doc-walk of project "${project}".\n` +
+    `You read and report ONLY. You write no files, change no status, move nothing. Return a DOC_FINDING object.\n\n` +
+    `Doc to audit: ${d.doc}  (tier: ${d.tier})\n` +
+    `Reconcile it against these foundation docs (read them, do not edit them): ${(d.reconcileAgainst || []).join(', ') || '(none)'}\n\n` +
+    `Check for:\n` +
+    `- COHERENCE: does this doc contradict the CONTRACT-SHEET, SYSTEM-TOPOLOGY, or a firm DECISION-LOG entry?\n` +
+    `- STALENESS: does it cite a file/RPC/seam/decision that no longer exists or was renamed?\n` +
+    `- COVERAGE: does it contain every section its template requires for its tier? Note any missing section.\n` +
+    `- CROSS-LINKS: do its links to sibling/foundation docs resolve? Is any doc an orphan nothing references?\n\n` +
+    `For each problem, give a 'detail' of "file:line — what is wrong" and a 'fix' suggestion FOR THE MAIN LOOP to consider.\n` +
+    `Do NOT apply any fix — the main loop adjudicates and the doc-walk's sequential path applies anything warranted.`,
+    { label: `audit:${d.tier}:${d.doc.split('/').pop()}`, phase: 'Audit', schema: DOC_FINDING, agentType: 'Explore' }
+  ))
+)
+
+return findings.filter(Boolean)
+```
+
+Pass `args: { project, docs }`, where each `docs` entry names one walked output and the foundation docs it must reconcile against. The Workflow returns a `runId` (capture it for resume) and an array of `DOC_FINDING`. Fold the findings into the walk report under the **Coherence Audit** subsection of Step 8, and surface any `critical`/`high` items to the user for a main-loop decision. **No fix is applied by the Workflow** — the doc-walk's normal sequential path (or a follow-up edit in the main loop) lands anything warranted.
+
+---
+
 ## Important Notes
 
-- **Sequential by design.** The four planning steps cannot run in parallel within a single category — each consumes the prior step's output. For multi-category mode (`--group`, `--categories`, `--all`), the steps proceed in batches: all categories complete Step 1, then all complete Step 2, etc. This honors the methodology's "boundary gaps need both sides visible" rule.
+- **Sequential by design.** The four planning steps cannot run in parallel within a single category — each consumes the prior step's output. For multi-category mode (`--group`, `--categories`, `--all`), the steps proceed in batches: all categories complete Step 1, then all complete Step 2, etc. This honors the methodology's "boundary gaps need both sides visible" rule. The optional coherence sweep is the only fan-out, and it runs read-only at the end.
+- **The coherence sweep is read-only and optional.** It writes nothing, flips no status, moves no project. The doc-walk works fully without it as a sequential read. Any fix it surfaces is a main-loop decision, never an in-script mutation (per `{COMMANDS_DIR}/topology-PRINCIPLES.md` Part II — the absolute HITL/read-only boundary).
 - **Status-aware by default.** Without `--force-redo`, the walk skips steps whose output documents already exist. This means the walk is **resumable** — if an earlier walk was interrupted, re-running will pick up at the first incomplete step. Pass `--force-redo` to override.
 - **Does not pause on decisions.** When `topology-gap` flags new DL entries needed (e.g., backfill strategy, type-migration option), the walk continues with documented defaults. All flagged decisions are aggregated into the final report. The user resolves DL entries between the walk's completion and `/topology-implement`. This avoids the friction of pausing 4× per category × N categories.
 - **Halts on errors.** If any sub-command fails, the walk stops and reports the failure. Prior outputs are left in place so the walk can resume after the error is fixed.
 - **Does NOT run topology-implement, topology-verify, topology-integrate, topology-e2e, or topology-promote.** This command is strictly the planning walk. After completion, use `topology-implement` (single category), `topology-sprint`/`topology-sprint-plan` (group of categories), or `topology-autopilot` (chained groups) to advance.
-- **Foundation documents are not modified.** `CONTRACT-SHEET.md` and `SYSTEM-TOPOLOGY.md` are append-only-via-DL after `topology-init`. The walk's outputs (CURRENT-STATE.md, GAP-ANALYSIS.md, etc.) are per-category; they do not amend the foundation.
-- **Single completion report, not four.** Each underlying command emits its own completion report when run individually. When invoked via `topology-doc-walk`, the sub-reports are captured and synthesized into a single walk report at the end. This reduces context noise and surfaces cross-category patterns (cascade, aggregate decisions) that single-category reports miss.
-- **Time estimate.** Single category ≈ 10-15 minutes. Group of 3 categories ≈ 25-40 minutes (boundary-gap visibility benefits batching). `--all` on a 12-category project ≈ 60-90 minutes.
+- **Foundation documents are not modified.** `CONTRACT-SHEET.md` and `SYSTEM-TOPOLOGY.md` are append-only-via-DL after `topology-init` (per `topology-PRINCIPLES.md` Part I — foundation-document mutation discipline). The walk's outputs (CURRENT-STATE.md, GAP-ANALYSIS.md, etc.) are per-category; they do not amend the foundation. The coherence sweep reads the foundation docs to reconcile against them but never edits them.
+- **Single completion report, not four.** Each underlying command emits its own completion report when run individually. When invoked via `topology-doc-walk`, the sub-reports are captured and synthesized into a single walk report at the end. This reduces context noise and surfaces cross-category patterns (cascade, aggregate decisions, coherence findings) that single-category reports miss.
+- **Time estimate.** Single category ≈ 10-15 minutes. Group of 3 categories ≈ 25-40 minutes (boundary-gap visibility benefits batching). `--all` on a 12-category project ≈ 60-90 minutes. The read-only coherence sweep parallelizes the audit pass, so it adds little wall-clock to multi-category modes.
 {{#if MULTI_AGENT}}
 - **Delegation speedup.** Use `{DELEGATE_FLAG}` to reduce roughly 25-40% on the more-mechanical sub-commands (current-state, phase-plan).
 {{/if}}
@@ -346,3 +424,5 @@ reference. Prefer making targeted edits or appending DL entries instead.
 Propagates `{DELEGATE_FLAG}` to every underlying topology-* invocation. Walk-level handoff
 plan posted at start; per-command handoff plans cascade from there.
 {{/if}}
+
+$ARGUMENTS

@@ -1,12 +1,15 @@
 # topology-dispatch
 
-Fan a single phase of a single category out to multiple specialist subagents working in parallel against a shared workspace. Use when a phase's tasks split cleanly across roles (e.g., a backend role and a frontend role) and the file sets are disjoint. Sister command to `topology-implement` — `topology-implement` runs single-agent phases via `project-next-phase`; `topology-dispatch` runs multi-agent phases via the dispatch protocol.
+Fan a single phase of a single category out to multiple specialist subagents working in parallel. Sister command to `topology-implement` — `topology-implement` runs single-role phases via `project-next-phase`; `topology-dispatch` runs multi-role phases. Two execution modes:
+
+- **Wave 1 (prose mode, shared workspace):** Agent-tool spawns, shared working tree, disjointness is a hard blocker. Simple; requires no Workflow tooling.
+- **Wave 2 (Workflow mode, worktree-isolated):** A deterministic Workflow script gives each specialist agent its own git worktree off fresh `origin/main`. Disjointness becomes advisory — overlapping scopes are a merge-order decision, not an abort. This is the mode the original "Wave 1" note anticipated ("Wave 2 may add per-agent worktrees").
+
+Use Wave 2 whenever the Workflow tool is available. Invoke this command explicitly — `topology-implement` Step 2.5 calls it automatically when the phase plan declares multi-role.
 
 {{#unless USE_SUBAGENTS}}
 > **Note:** This project is configured without specialist subagents (`use_subagents: false`). Every phase is single-role by definition, so dispatch never applies — run `/topology-implement <project> <category>` for all phases instead.
 {{/unless}}
-
-**Wave 1: manual invocation only.** Main thread (or user) decides which phase is parallelizable and invokes this command explicitly. Wave 2 will add auto-trigger from `topology-implement` when `topology-phase-plan` declares parallelism.
 
 ## Usage
 
@@ -15,7 +18,7 @@ Fan a single phase of a single category out to multiple specialist subagents wor
 /topology-dispatch <project-name> <category-slug> --phase <N>
 /topology-dispatch <project-name> <category-slug> --phase <N> --agents {{#each SUBAGENT_TYPES as t}}{t},{{/each}}
 /topology-dispatch <project-name> <category-slug> --phase <N> --dry-run
-/topology-dispatch <project-name> <category-slug> --phase <N> --resume
+/topology-dispatch <project-name> <category-slug> --phase <N> --resume [<runId>]
 ```
 
 ### Arguments
@@ -27,8 +30,8 @@ Fan a single phase of a single category out to multiple specialist subagents wor
 
 - `--phase <N>` — explicit phase number. Default: the next In-Progress / pending phase from PHASE-PLAN.md
 - `--agents <comma-list>` — explicit agent roster. Default: inferred from the phase plan's task scope (file paths → roles)
-- `--dry-run` — write BRIEF.md and STATUS.md, print the dispatch plan, do NOT spawn subagents. Use for review before commit.
-- `--resume` — re-enter an existing dispatch directory, read STATUS.md, re-spawn any agents whose state is `dispatched` but whose background process died, or proceed to synthesis if all complete
+- `--dry-run` — write BRIEF.md and STATUS.md, print the dispatch plan, do NOT spawn agents or run the Workflow. Use for review before commit.
+- `--resume [<runId>]` — re-enter an existing dispatch. In Wave 2 mode: re-invoke the Workflow with `resumeFromRunId` so already-completed agents return cached. In Wave 1 mode: re-read STATUS.md, re-spawn any agents whose process died, or proceed to synthesis if all complete.
 
 ---
 
@@ -39,6 +42,7 @@ Fan a single phase of a single category out to multiple specialist subagents wor
 - [ ] FUTURE-STATE exists: `categories/<category-slug>/FUTURE-STATE.md`
 - [ ] Implementation scaffolded: `categories/<category-slug>/implementation/CLAUDE.md`
 - [ ] Git working tree clean (uncommitted changes block parallel dispatch — agents would fight over the diff)
+- [ ] **Divergence guard (Wave 2):** `git fetch origin && git rev-list --count origin/main..main` is 0 before spawning worktrees
 
 If any are missing, abort with the specific remediation command (e.g., `Run /topology-future-state <project> <category> first`).
 
@@ -80,13 +84,13 @@ Otherwise, parse the phases table in `categories/<category-slug>/implementation/
 - If all phases are Complete, abort:
   > All phases for <category> are complete. Run `/topology-verify <project> <category>` next.
 
-Read that phase's full entry from `categories/<category-slug>/PHASE-PLAN.md` — the task list, exit criteria, and file scope.
+Read that phase's full entry from `categories/<category-slug>/PHASE-PLAN.md` — the task list, exit criteria, Role profile, and file scope per role.
 
 ### Step 3: Determine the agent roster
 
 If `--agents <list>` was passed, use it. Validate every name resolves to a project agent under `.claude/agents/` (must be one of the project's subagent types: {{#each SUBAGENT_TYPES as t}}`{t}` {{/each}}).
 
-Otherwise, infer from the phase plan's file scope by mapping each path region to one of the project's subagent types. Use the same path → role inference rules as `topology-phase-plan` Rule 6:
+Otherwise, use the phase plan's declared Role profile if present; else infer from the phase plan's file scope by mapping each path region to one of the project's subagent types. Use the same path → role inference rules as `topology-phase-plan` Rule 6:
 
 | Path region | Role |
 |---|---|
@@ -98,26 +102,31 @@ Otherwise, infer from the phase plan's file scope by mapping each path region to
 
 Any path region with no matching specialist role falls back to the project's general-purpose subagent type.
 
+Emit the inference verdict in chat before proceeding — it is the observable signal that routing happened.
+
 If only one role surfaces, abort with:
 > Phase scope is single-role (<role>). Use `/topology-implement <project> <category>` instead — dispatch is for multi-role phases.
 
-If three or more surface, list them and ask the user to confirm or trim before scaffolding (high parallelism amplifies the cost of a bad disjointness check).
+If three or more surface, list them and ask the user to confirm or trim before scaffolding (high parallelism amplifies the cost of a bad split).
 
-### Step 4: Disjointness pre-check
-
-Before scaffolding the workspace, run a quick preview that confirms each agent's intended file scope does not overlap any other agent's scope.
+### Step 4: Disjointness check
 
 For each pair of agents (i, j):
 - Compute the union of their declared scope paths
 - Run `git ls-files <path>` for each path
-- Confirm no file appears in both result sets
+- Confirm whether any file appears in both result sets
 
-If overlaps are found:
-- If trivial (e.g., a single shared config file), document it in the BRIEF as requiring LOCKS/ coordination
-- If significant (e.g., both touch the same service directory), abort with:
-  > Scope overlap detected: <files>. Either re-run with `--agents` overriding the roster, or rethink the phase plan to make scopes disjoint, or use `/topology-implement` for a single-agent phase.
+**Wave 1 (shared workspace):** Disjointness is a hard blocker.
+- If overlaps are trivial (e.g., a single shared config file), document in BRIEF under LOCKS/ coordination and proceed.
+- If overlaps are significant (e.g., both touch the same service directory), abort:
+  > Scope overlap detected: <files>. Either re-run with `--agents` overriding the roster, rethink the phase plan to make scopes disjoint, or use `/topology-implement` for a single-agent phase.
 
-Do NOT proceed to scaffolding until disjointness is confirmed.
+**Wave 2 (worktree-isolated):** Disjointness is advisory, not a blocker.
+- Each agent works in its own worktree off `origin/main`, so overlaps no longer scramble commit attribution.
+- Record any overlap in the BRIEF under "Merge-order notes" so the synthesis step knows which branches to land in which order and where to expect conflicts.
+- Do NOT abort for overlap in Wave 2.
+
+Do NOT proceed to scaffolding until the check result is recorded.
 
 ### Step 5: Scaffold the workspace
 
@@ -125,10 +134,10 @@ Create:
 ```
 {PROJECTS_ACTIVE_DIR}/<project>/sprints/<sprint-id>/dispatches/<category-slug>-phase<N>/
 ├── BRIEF.md
-├── WORKSPACE.md
 ├── STATUS.md
-├── LOCKS/        (empty)
-└── HANDOFFS/     (empty)
+├── WORKSPACE.md       (Wave 1 only)
+├── LOCKS/             (Wave 1, empty)
+└── HANDOFFS/          (Wave 1, empty)
 ```
 
 If the directory already exists and `--resume` is NOT set, abort:
@@ -142,7 +151,14 @@ Required content:
 - Frontmatter: dispatch_id, project, category, phase, phase_title, sprint_id, created_at, created_by, autonomy
 - **Phase objective** lifted (paraphrased, one paragraph) from PHASE-PLAN.md
 - **Anchor docs** with relative paths from the project root + relevant section anchors from FUTURE-STATE
-- **Disjointness pre-check** statement confirming the Step 4 check passed
+- **Disjointness check result** from Step 4 (Wave 1: confirmed disjoint / Wave 2: merge-order notes with overlapping files listed)
+- **Worktree branches table** (Wave 2 only):
+
+  | Agent | Role | Worktree Branch (off origin/main) | Scope |
+  |---|---|---|---|
+  | <agent-1> | <role> | `{BRANCH_PREFIX}<project>/<category>-p<N>-<role-abbrev>` | `<path>` |
+  | <agent-2> | <role> | `{BRANCH_PREFIX}<project>/<category>-p<N>-<role-abbrev>` | `<path>` |
+
 - **Agents** section, one subsection per agent in the roster, each containing:
   - Scope (literal paths, no wildcards that match unintended siblings)
   - Read-only context (paths to read but not write)
@@ -150,12 +166,12 @@ Required content:
   - Exit criteria (observable outcomes — files written, tests passing)
 - **Cross-agent contracts** (only if shared interfaces exist)
 - **Out of scope** (be explicit — anything outside per-agent scope, anything in later phases, anything in other categories)
-- **Reporting** (standard text — append to WORKSPACE.md, return ≤200-word summary)
-- **Forbidden** (standard text — no out-of-scope writes, no BRIEF edits, no main commits, no `--no-verify`)
+- **Reporting** (standard text — append to WORKSPACE.md (Wave 1) or commit to worktree branch (Wave 2), return ≤200-word summary)
+- **Forbidden** (standard text — no out-of-scope writes, no BRIEF edits, no commits to main, no `--no-verify`)
 
 ### Step 7: Write initial WORKSPACE.md and STATUS.md
 
-WORKSPACE.md — pre-create one section per agent so writes target a known anchor:
+**Wave 1 only — WORKSPACE.md:** Pre-create one section per agent so writes target a known anchor:
 
 ```markdown
 # Dispatch Workspace — <category> Phase <N>
@@ -175,18 +191,24 @@ _Pending — agent has not started._
 _Use HANDOFFS/ for synchronous handoffs. This section is for shared observations the orchestrator should see._
 ```
 
-STATUS.md — initial state per protocol § 6, with `state: scaffolded`.
+**STATUS.md (both modes):** Initial state per protocol § 6, with `state: scaffolded`.
 
 ### Step 8: Dry-run gate
 
 If `--dry-run` is set:
 - Print the absolute path to BRIEF.md and STATUS.md
-- Print a one-screen summary of the dispatch plan (agents, scopes, exit criteria)
-- Stop. Do NOT spawn subagents.
+- Print a one-screen summary of the dispatch plan (agents, scopes, exit criteria, Wave mode, worktree branches if Wave 2)
+- Stop. Do NOT spawn agents or run the Workflow.
 - Tell the user how to proceed:
   > Review the brief at `<path>/BRIEF.md`. To execute: re-run without `--dry-run`. To revise: edit BRIEF.md and re-run with `--resume`.
 
-### Step 9: Spawn subagents in background
+---
+
+## Execution — Wave 1 (Prose Mode, Shared Workspace)
+
+Use when the Workflow tool is unavailable. Disjointness pre-check from Step 4 is a hard gate.
+
+### Step 9a: Spawn subagents in background
 
 For each agent in the roster, invoke the Agent tool with `run_in_background: true` and `subagent_type: <role>`.
 
@@ -207,10 +229,12 @@ Your scope (paths you may write) is declared in BRIEF.md under "Agents → Agent
 Anything outside that scope: STOP and write to <WORKSPACE_PATH>/HANDOFFS/.
 
 When complete:
-1. Append a "### Summary" subsection to your WORKSPACE.md section listing files changed, tests run + result, any handbacks raised, and recommended commit boundary
-2. Return a concise summary (≤200 words) of what you delivered. The orchestrator reads this synchronously.
+1. Append a "### Summary" subsection to your WORKSPACE.md section listing files changed,
+   tests run + result, any handbacks raised, and recommended commit boundary
+2. Return a concise summary (≤200 words) of what you delivered.
 
-If you hit a blocking issue, write a HANDOFFS/<from>-to-orchestrator-<slug>.md with `blocking: true` and return a brief explanation immediately — do not retry indefinitely.
+If you hit a blocking issue, write a HANDOFFS/<from>-to-orchestrator-<slug>.md with
+`blocking: true` and return a brief explanation immediately — do not retry indefinitely.
 ```
 
 Capture each background agent's ID. Update STATUS.md:
@@ -219,24 +243,24 @@ Capture each background agent's ID. Update STATUS.md:
 
 Report to the user:
 ```
-## topology-dispatch — Spawned
+## topology-dispatch — Spawned (Wave 1)
 
 **Project:** <project>  **Category:** <slug>  **Phase:** <N>
 **Workspace:** <absolute path>
 
 Agents running in background:
-- backend-coder  (bg-<id>)  — <one-line subtask>
-- frontend-coder (bg-<id>)  — <one-line subtask>
+- <role-1>  (bg-<id>)  — <one-line subtask>
+- <role-2>  (bg-<id>)  — <one-line subtask>
 
 Watching for completion. Will synthesize when all agents return.
 ```
 
-### Step 10: Wait, monitor, synthesize
+### Step 10a: Wait, monitor, synthesize (Wave 1)
 
-This step runs in the orchestrator's main loop after spawning. The orchestrator does NOT poll — it relies on the background-agent completion notifications surfaced by the harness.
+This step runs in the orchestrator's main loop. The orchestrator does NOT poll — it relies on background-agent completion notifications from the harness.
 
-When EACH agent reports back (their subagent task ends):
-1. Update STATUS.md: that agent's row → `state: complete`, fill `Completed` and `Files Changed` (count from their summary)
+When EACH agent reports back:
+1. Update STATUS.md: that agent's row → `state: complete`, fill `Completed` and `Files Changed`
 2. Read HANDOFFS/ and triage:
    - Any new `blocking: true` file → pause, surface to user with the handoff body, set `state: hitl-paused`
    - Non-blocking handoffs accumulate for the synthesis report
@@ -262,75 +286,198 @@ When ALL agents reach `state: complete`:
    Co-Authored-By: Claude <noreply@anthropic.com>
    ```
 7. Write a synthesis section to STATUS.md `## Notes` with: commits created, verify gate results, handoffs reviewed, any items deferred to follow-up
-8. Update `categories/<category-slug>/implementation/CLAUDE.md` phases table marking this phase Complete (same way `project-next-phase` would)
+8. Update `categories/<category-slug>/implementation/CLAUDE.md` phases table marking this phase Complete
 9. Update `VERIFICATION-TABLE.md` cells affected by this phase to `⏳ (impl complete, verify pending)` — never `✓` (only `topology-verify` promotes to `✓`)
-10. Append to `categories/<category-slug>/APP-DOC-IMPACT.md` if any user-facing changes landed (per `topology-implement.md` Step 4b)
+10. Append to `categories/<category-slug>/APP-DOC-IMPACT.md` if any user-facing changes landed
 
-### Step 11: Report completion
+---
+
+## Execution — Wave 2 (Workflow Mode, Worktree-Isolated)
+
+Use when the Workflow tool is available. The deterministic script owns the fan-out; agents inside it do judgment work and return schema-validated structured data. Worktree isolation demotes the disjointness pre-check from a hard blocker to advisory — each agent commits to its own branch off `origin/main`, and the orchestrator lands branches via PR.
+
+### Step 9b: Author and invoke the Workflow
+
+Author the script and call the `Workflow` tool (this invocation is the user opt-in). Each specialist agent runs with `isolation: 'worktree'` and its declared `agentType`.
+
+```js
+export const meta = {
+  name: 'topology-dispatch',
+  description: 'Multi-role topology phase: each specialist agent in its own worktree, then synthesize',
+  phases: [{ title: 'Build', detail: 'one specialist agent per role, isolated worktrees' }],
+}
+
+// Schema shared with topology-sprint and topology-autopilot — copy verbatim, no imports
+const PHASE_RESULT = {
+  type: 'object',
+  required: ['phase', 'status'],
+  properties: {
+    phase:        { type: 'integer' },
+    status:       { enum: ['complete', 'failed', 'needs-hitl'] },
+    filesChanged: { type: 'array', items: { type: 'string' } },
+    testsRun:     { type: 'string' },
+    testResult:   { enum: ['pass', 'fail', 'n/a'] },
+    commitSha:    { type: 'string' },
+    docImpact:    { type: 'string' },
+    hitl: {
+      type: 'object',
+      properties: {
+        reason:  { type: 'string' },
+        details: { type: 'string' },
+        remediationOptions: { type: 'array', items: { type: 'string' } },
+      },
+    },
+  },
+}
+
+// args supplied by the orchestrator: project, category, phase, briefPath,
+// roster: [{ role, agentType, branch, scope, subtask, exitCriteria }]
+const { project, category, phase, briefPath, roster } = args
+
+phase('Build')
+const results = await parallel(roster.map(r => () =>
+  agent(
+    `You are the ${r.role} specialist on a topology-dispatch phase, working in an ISOLATED git ` +
+    `worktree on branch ${r.branch} (already created off fresh origin/main).\n\n` +
+    `Read first:\n` +
+    `1. ${briefPath} — your task spec\n` +
+    `2. The category FUTURE-STATE.md — the target contract\n\n` +
+    `Your scope (write ONLY here): ${r.scope}\n` +
+    `Your subtask: ${r.subtask}\n` +
+    `Exit criteria: ${r.exitCriteria}\n\n` +
+    `Implement, run the targeted tests for your scope, and COMMIT to your worktree branch ` +
+    `(${'{COMMIT_CONVENTION}'} style, never --no-verify, never to main).\n\n` +
+    `If your task spec is ambiguous or you must touch a security-sensitive path ` +
+    `(auth / secrets / billing), STOP — return status 'needs-hitl' with hitl.reason + details. ` +
+    `Do not improvise architectural decisions.\n\n` +
+    `Return a PHASE_RESULT: filesChanged, testsRun + testResult, your commitSha, ` +
+    `and a one-line docImpact (or "none").`,
+    {
+      label:     `${r.role}:p${phase}`,
+      phase:     'Build',
+      schema:    PHASE_RESULT,
+      agentType: r.agentType,
+      isolation: 'worktree',
+    }
+  )
+))
+
+return results.filter(Boolean)
+```
+
+Pass `args: { project, category, phase, briefPath, roster }`. Capture the returned `runId`.
+
+> **Resume:** When a HITL is resolved later, re-invoke with `resumeFromRunId: <runId>` and the same script. Already-completed agent calls return cached; only the unblocked path and everything after re-run. Do NOT use `Date.now()` / `Math.random()` / `new Date()` inside Workflow script bodies — they break deterministic resume.
+
+Report to the user:
+```
+## topology-dispatch — Workflow Running (Wave 2)
+
+**Project:** <project>  **Category:** <slug>  **Phase:** <N>
+**Workflow runId:** <runId>
+
+Agents running in isolated worktrees:
+- <role-1>  — branch: <branch>  — <one-line subtask>
+- <role-2>  — branch: <branch>  — <one-line subtask>
+
+Waiting for Workflow to return results.
+```
+
+### Step 10b: Synthesize (Wave 2 — the orchestrator is the only integrator)
+
+When the Workflow returns `results: PHASE_RESULT[]`:
+
+1. **Triage HITL:** any `status: 'needs-hitl'` → do NOT land any branch. Write a `CHECKPOINT.md`:
+   - `dispatch_id`, `project`, `category`, `phase`
+   - `paused_at`, `current_state` (which agents completed, which returned needs-hitl)
+   - `hitl_reason` from the agent's HITL object
+   - `hitl_details` and `remediationOptions`
+   - `workflow_run_id` for resume
+   Set STATUS.md `state: hitl-paused` and surface to the user with exact remediation commands.
+   The completed agents' worktree branches are preserved — they survive until resume.
+
+2. **All complete:** land each worktree branch via PR in the merge order declared in the BRIEF's "Merge-order notes". Run `/topology-merge <project> <category>` per branch (or sequence them if Step 4 flagged overlap). Never `git merge` into local `main` directly.
+
+3. After all branches land, run the verify gates from a synced `main` (lint on touched packages, type check, the phase plan's targeted tests).
+
+4. Update `categories/<category-slug>/implementation/CLAUDE.md` phases table → this phase Complete.
+
+5. Update `VERIFICATION-TABLE.md` affected cells → `⏳ (impl complete, verify pending)` — never `✓`.
+
+6. Append each agent's `docImpact` line to `categories/<category-slug>/APP-DOC-IMPACT.md` if non-empty.
+
+7. Write the synthesis to STATUS.md `## Notes` (branches landed, verify gate results, HITL triaged, runId for audit trail).
+
+---
+
+## Step 11: Report Completion
 
 ```
 ## topology-dispatch Complete
 
 **Project:** <project>  **Category:** <slug>  **Phase:** <N>
-**Workspace:** <path>
-**Duration:** <HH:MM>
+**Execution mode:** Wave 1 (shared workspace) | Wave 2 (worktree-isolated)
+**Workflow runId:** <runId>  (Wave 2 only)
 
 ### Agents
-- backend-coder: complete (<files> files changed)
-- frontend-coder: complete (<files> files changed)
+- <role-1>: complete — <files> files changed, tests <pass/fail>
+  (Wave 2: branch <branch> landed via PR #<n>)
+- <role-2>: complete — <files> files changed, tests <pass/fail>
+  (Wave 2: branch <branch> landed via PR #<n>)
 
 ### Verify gates
-- Lint: pass
-- Type check: pass
+- Lint: <result>
+- Type check: <result>
 - Targeted tests: <N> passed, <N> failed
 
-### Commits
-- <SHA> <message>
-- <SHA> <message>
+### Commits / PRs
+- <SHA or PR #> <message>
 
 ### Handoffs
-- <count> non-blocking handoffs surfaced (see WORKSPACE.md "Cross-agent notes")
+- <count> non-blocking handoffs (see WORKSPACE.md "Cross-agent notes")
 - 0 blocking handoffs
 
 ### Verification Table
-- Cells updated: <list>  → ⏳ (impl complete, verify pending)
+- Cells updated: <list> → ⏳ (impl complete, verify pending)
 
 ### Next step
 Run: /topology-verify <project-name> <category-slug>
   (or: /topology-implement <project-name> <category-slug> for the next phase)
 ```
 
-### Step 12: HITL escalation (if any blocking handoff or scope violation)
+### Step 12: HITL Escalation
 
-When the dispatch pauses (HITL):
+When the dispatch pauses (blocking handoff, scope violation, or `needs-hitl` return):
+
 1. Set STATUS.md `state: hitl-paused`
-2. Write `<dispatch-dir>/CHECKPOINT.md` mirroring the format from `topology-sprint.md` Step 5, with:
+2. Write `<dispatch-dir>/CHECKPOINT.md`:
    - `dispatch_id`, `project`, `category`, `phase`
    - `paused_at`, `current_state` (which agents finished, which are blocked)
-   - `hitl_reason` enum: `dispatch-scope-violation` | `blocking-handoff` | `verify-gate-failure` | `commit-boundary-ambiguous`
-   - `hitl_details` with the specific handoff body or scope-violation file list
+   - `hitl_reason` enum: `dispatch-scope-violation` | `blocking-handoff` | `verify-gate-failure` | `commit-boundary-ambiguous` | `needs-hitl` (agent-returned)
+   - `hitl_details` with the specific handoff body, scope-violation file list, or agent HITL object
    - `remediation_options` with concrete commands the user can run
-3. Surface the checkpoint to the user with the exact remediation commands
+   - `workflow_run_id` (Wave 2 only — for `--resume <runId>`)
+3. Surface the checkpoint to the user with exact remediation commands
 
 To resume after HITL:
 ```
-/topology-dispatch <project> <category> --phase <N> --resume
+/topology-dispatch <project> <category> --phase <N> --resume [<runId>]
 ```
 
-The resume path re-reads STATUS.md, processes any newly-resolved handoffs, and either re-spawns failed agents or proceeds to synthesis.
+The resume path re-reads STATUS.md and CHECKPOINT.md. Wave 2: re-invokes the Workflow with `resumeFromRunId` — completed agents return cached. Wave 1: re-spawns agents whose process died or proceeds to synthesis if all complete.
 
 ---
 
 ## Important Notes
 
-- **Disjointness is the load-bearing assumption.** If two agents touch the same file, the protocol does not save you — Step 4 must catch this. If overlaps surface during execution, that is a HITL event, not a "work it out" event.
-- **The orchestrator is the only committer.** Agents may stage changes locally but never commit to main. This keeps commit boundary decisions in one place where the full diff is visible.
-- **Workspace lives in the sprint dir.** Dispatch artifacts get committed alongside category docs at sprint verify-green time. They are part of the durable record of how the work was done.
-- **One dispatch per (category, phase) at a time.** Re-running with `--resume` is safe; running a fresh dispatch over an existing one requires manual deletion (and loses prior findings).
-- **No worktree per agent in Wave 1.** All agents share the same working tree. The protocol relies on declared scopes + disjointness pre-check + post-hoc `git status` verification. If we see scope drift in practice, Wave 2 may add per-agent worktrees.
+- **Wave 2 is the preferred mode.** Worktree isolation (Workflow pattern 2) makes overlapping scopes a merge-order decision rather than an abort. This is the fix for the index-race that scrambled commit attribution under shared worktrees — the disjointness pre-check demotes from blocker to advisory.
+- **The orchestrator is the only integrator.** In Wave 1, agents stage but never commit. In Wave 2, agents commit to their own worktree branch only — landing to `main` happens via `/topology-merge` → PR, in one place where the full picture is visible.
+- **HITL is returned as data, not asked inside the Workflow.** An ambiguous spec or a security-sensitive touch causes the agent to return `needs-hitl`; the main loop adjudicates. Worktree branches survive for `--resume`.
 - **Single-role phases must use `topology-implement`.** This command aborts in Step 3 if the inferred roster has only one role. Dispatch is for multi-role parallel work; single-agent phases should stay simple.
-- **`--dry-run` is cheap and recommended for first uses.** Review BRIEF.md before letting agents loose. The brief is the contract — if it's wrong, agents will faithfully do the wrong thing in parallel.
-- **Wave 2 will add the auto-trigger.** When `topology-phase-plan` learns to declare `parallel_dispatch:` in its output, `topology-implement` Step 3b will auto-call this command. Until then, it's manual.
+- **`--dry-run` is cheap and recommended for first uses.** Review BRIEF.md before letting agents loose. The BRIEF is the contract — if it's wrong, isolated agents will faithfully do the wrong thing in parallel.
+- **Workspace artifacts live in the sprint dir.** Dispatch artifacts are committed alongside category docs at sprint verify-green time. They are part of the durable record of how the work was done.
+- **One dispatch per (category, phase) at a time.** `--resume` is safe; running a fresh dispatch over an existing one requires manual deletion (loses prior brief and findings).
+- **Worktree isolation has overhead** (~200–500ms + disk per agent). Worth it for genuine multi-role phases; never use dispatch for a single-file change.
 
 ---
 

@@ -1,8 +1,8 @@
 # topology-init
 
-Initialize a new topology-driven rebuild project. Creates the project root directory and all four foundation documents from source material. This is the only topology command that runs without prior topology outputs — it must run first.
+Initialize a new topology-driven rebuild project. Creates the project root directory and all four foundation documents from source material, then authors per-category `CLAUDE.md` files (serially or, when the `Workflow` tool is available, in a parallel fan-out). This is the only topology command that runs without prior topology outputs — it must run first.
 
-> **See `.claude/commands/topology-PRINCIPLES.md` for the design discipline behind this skill.** In particular: foundation document mutation discipline (CONTRACT-SHEET / SYSTEM-TOPOLOGY append-only after init; DECISION-LOG append-only forever); the category CLAUDE.md template (Step 8.5) responds directly to failure modes 1, 2, and 4 (context overload, scattered cross-cutting concerns, phase-context loss).
+> **See `{COMMANDS_DIR}/topology-PRINCIPLES.md` for the design discipline behind this skill.** In particular: foundation document mutation discipline (CONTRACT-SHEET / SYSTEM-TOPOLOGY append-only after init; DECISION-LOG append-only forever); the category CLAUDE.md template (Step 8.5) responds directly to failure modes 1, 2, and 4 (context overload, scattered cross-cutting concerns, phase-context loss); seams are bilateral (failure mode #3).
 
 ## Usage
 
@@ -20,6 +20,29 @@ Initialize a new topology-driven rebuild project. Creates the project root direc
 - Both flags may be combined. If both are provided, `--from-doc` is the primary anchor and `--from-dir` provides supporting context.
 
 At least one of `--from-doc` or `--from-dir` is required. Running without source material is not permitted — the agent cannot derive correct contracts from general knowledge alone.
+
+### Placeholders
+
+| Placeholder | Meaning |
+|-------------|---------|
+| `<project-name>` | Project slug → directory under `{PROJECTS_ACTIVE_DIR}/` |
+| `<slug>` | A single category's directory slug |
+| `<date>` | Run date, stamped by the main loop (never inside a workflow script) |
+
+---
+
+## Orchestration mode
+
+**Steps 1–8 and 9–10 always run in the main agent loop.** The four shared foundation documents (CONTRACT-SHEET, SYSTEM-TOPOLOGY, DECISION-LOG, VERIFICATION-TABLE) are single-author synthesis — they demand one coherent voice across categories and must not be fanned out.
+
+**Step 8.5 (per-category CLAUDE.md authoring)** can run in either of two modes:
+
+| Mode | When to use | How |
+|------|-------------|-----|
+| **Prose / serial** | Default; `Workflow` tool unavailable or N ≤ 3 categories | Iterate over categories in the main loop, write each CLAUDE.md directly |
+| **Workflow / parallel fan-out** | `Workflow` tool available and N ≥ 4 categories | Author a JS Workflow script with `parallel()`, one agent per category; see Step 8.5 |
+
+Invoking `/topology-init` is sufficient opt-in for whichever mode is used — no separate authorization step is needed. The parallel mode has **no HITL-mid-run risk** and crosses **no E2E/promote boundary**; it only creates docs.
 
 ---
 
@@ -240,13 +263,93 @@ Legend:
 - `✓` = Verified
 - `✗` = Failing (needs remediation)
 
-### Step 8.5: Create per-category CLAUDE.md (forward-apply only)
+> **The four foundation docs above (Steps 5–8) are written by the main loop, single-author.** They are the synthesis substrate the per-category CLAUDE.md authoring step (Step 8.5) reads from. Do not start any fan-out until all four exist on disk — each agent reads them to build its filtered view.
+
+### Step 8.5: Author per-category CLAUDE.md (forward-apply only)
 
 For each category identified in Step 4, create `categories/<slug>/CLAUDE.md`. This is the doc the implementing agent loads first when picking up the category cold. It is the **filtered view** of the project-wide foundation documents, narrowed to what THIS category needs.
 
 > **Forward-apply only.** This step runs only on `topology-init` for new projects. Existing projects (initialized before this step landed) keep their current shape; do NOT retroactively scaffold category CLAUDE.md files into pre-existing projects. The original project owner can opt in by deleting `categories/<slug>/CLAUDE.md` and re-running a project-prep step (or hand-authoring per the template here).
 
-The template:
+#### Option A — Prose / serial mode (default)
+
+When the `Workflow` tool is unavailable, or when there are three or fewer categories, iterate over the category list in the main loop and write each `categories/<slug>/CLAUDE.md` directly using the template below. Apply the filtering rules (Decisions in scope, Cross-category touchpoints) for each category before writing. Proceed to Step 8.6 after all files are written.
+
+#### Option B — Workflow / parallel fan-out mode
+
+When the `Workflow` tool is available and there are four or more categories, author the script below (substituting the project-specific values into `args`) and invoke it via the `Workflow` tool. The main loop resumes at Step 8.6 once the workflow returns.
+
+Each category's CLAUDE.md is an independent filtered view of foundation docs that are already final, so one agent per category authors its own with no contention. No shared file is mutated inside the workflow; there is no HITL boundary to cross.
+
+```js
+export const meta = {
+  name: 'topology-init-category-claudes',
+  description: 'Fan out one agent per category to author its filtered CLAUDE.md from the finished foundation docs',
+  phases: [
+    { title: 'Author', detail: 'one agent per category writes categories/<slug>/CLAUDE.md and returns its filtered slice' },
+  ],
+}
+
+// --- inline schema for this command's structured return ---
+// One category's authored CLAUDE.md, summarized for the main loop to reconcile.
+const CATEGORY_CLAUDE = {
+  type: 'object',
+  required: ['category', 'dlsInScope', 'touchpoints'],
+  properties: {
+    category:    { type: 'string' },                  // category slug
+    written:     { type: 'boolean' },                 // true once categories/<slug>/CLAUDE.md is on disk
+    dlsInScope:  { type: 'array', items: { type: 'object', required: ['id', 'why'], properties: {
+      id:  { type: 'string' },                        // "DL-003"
+      why: { type: 'string' },                        // one line: which contract/seam/responsibility this DL anchors here
+    }}},
+    touchpoints: { type: 'array', items: { type: 'object', required: ['seam', 'role', 'adjacent'], properties: {
+      seam:     { type: 'string' },                   // "S5"
+      role:     { enum: ['Producer', 'Consumer'] },
+      adjacent: { type: 'string' },                   // adjacent category slug
+    }}},
+    notes: { type: 'string' },
+  },
+}
+
+const { project, categories, root, template } = args
+// categories: [{ slug, title }]
+// root:       "{PROJECTS_ACTIVE_DIR}/<project-name>/"
+// template:   the verbatim category CLAUDE.md template string (below), with placeholders intact
+
+phase('Author')
+const authored = await parallel(
+  categories.map(c => () => agent(
+    `You are authoring the filtered category CLAUDE.md for ONE category of topology project "${project}".\n` +
+    `Category: ${c.title} (slug: ${c.slug})\n` +
+    `Project root: ${root}\n\n` +
+    `Read these finished foundation docs (do NOT modify them — they are append-only after init):\n` +
+    `- ${root}TOPOLOGY-CLAUDE.md\n` +
+    `- ${root}CONTRACT-SHEET.md\n` +
+    `- ${root}SYSTEM-TOPOLOGY.md\n` +
+    `- ${root}DECISION-LOG.md\n\n` +
+    `Produce ${root}categories/${c.slug}/CLAUDE.md by filling this exact template:\n\n` +
+    template + `\n\n` +
+    `FILTERING RULES (load-bearing — these are why this doc exists):\n` +
+    `- Decisions in scope: include a DL row iff (a) its Affects: line names a contract or seam this category participates in, ` +
+    `OR (b) its Affects: line names this category explicitly, OR (c) it is a project-wide foundational decision (first ~5–10 DLs). ` +
+    `If unsure, INCLUDE it — over-inclusion is recoverable; a missing load-bearing decision is the failure mode this section prevents. ` +
+    `For a DL that touches the category broadly without anchoring on a specific contract/seam, mark the third column "general scope".\n` +
+    `- Cross-category touchpoints: for every seam in SYSTEM-TOPOLOGY.md where this category is producer or consumer, add a row citing the adjacent category's CLAUDE.md path.\n` +
+    `- Responsibility/Owns/Produces/Consumes/Out-of-scope: derive sole-ownership claims from the foundation docs; surface EVERY clear out-of-scope claim; never blur with adjacent categories.\n` +
+    `- Implementation entry points: leave empty (later commands populate it).\n\n` +
+    `Write the file, then return a CATEGORY_CLAUDE summarizing the DLs you scoped in and the touchpoints you listed.`,
+    { label: `author:${c.slug}`, phase: 'Author', schema: CATEGORY_CLAUDE }
+  ))
+)
+
+return authored.filter(Boolean)
+```
+
+Pass `args: { project, categories, root, template }` where `template` is the verbatim category CLAUDE.md template (next subsection) with all `<placeholders>` intact for the agent to fill.
+
+> **Why fan-out here is safe.** Each agent writes a distinct file (`categories/<slug>/CLAUDE.md`), reads-only the shared foundation docs, and mutates nothing else. There is no shared-file contention, no git mutation, and no decision to adjudicate — so there is no HITL boundary to cross inside the workflow. The workflow returns the per-category slices; the main loop reconciles them in Step 8.6.
+
+#### The category CLAUDE.md template
 
 ```markdown
 # <Category Title> — Category CLAUDE
@@ -269,7 +372,7 @@ The template:
 
 ## Produces
 
-<contracts (events, types, RPCs) this category emits — list each with the seam it belongs to>
+<contracts (events, types, service methods) this category emits — list each with the seam it belongs to>
 
 ## Consumes
 
@@ -336,6 +439,16 @@ If unsure, include the DL — over-inclusion is recoverable; missing a load-bear
 
 For each seam in `SYSTEM-TOPOLOGY.md`, if category X is the producer or consumer, add a row. Cite the adjacent category's CLAUDE.md path so the implementer can navigate without re-deriving the seam graph.
 
+### Step 8.6: Reconcile category CLAUDE.md files (main loop)
+
+After Step 8.5 completes — whether serial or fan-out — verify coherence across the authored files. In Workflow mode, read the returned `CATEGORY_CLAUDE[]`; in serial mode, verify against what was just written.
+
+- **Every category authored.** If any category is missing a file (or `written !== true` in Workflow mode), author its CLAUDE.md from the template directly — never leave a category without its filtered view.
+- **Touchpoint symmetry (seams are bilateral).** For each touchpoint where category A names category B as adjacent (Producer), confirm B's CLAUDE.md lists the same seam with role Consumer (and vice versa). If a seam appears on only one side, that is an authoring gap — patch the missing side's CLAUDE.md so both ends agree. A one-sided seam reference is failure mode #2/#3 leaking in.
+- **DL coverage.** Confirm every project-wide foundational DL (first ~5–10) appears in scope for the categories it governs. If a load-bearing DL is absent from a category that participates in its affected contract/seam, add it (over-inclusion is correct here).
+
+Do not edit the foundation docs during reconciliation — they are append-only after init. Reconciliation only touches `categories/<slug>/CLAUDE.md` files.
+
 ### Step 9: Create TOPOLOGY-CLAUDE.md
 
 The master project file. Analogous to `CLAUDE.md` in the implementation project system.
@@ -369,13 +482,16 @@ topology-current-state ← Run per category
 topology-gap           ← Run per category
 topology-phase-plan    ← Run per category
 topology-future-state  ← Run per category
-topology-implement     ← Run per category (delegates to project-next-phase)
+topology-implement     ← Run per category (delegates to project-next-phase); worktrees off origin/main
 topology-verify        ← Run per category
+topology-merge         ← Land worktree branches via PR (never merge into local main)
 topology-integrate     ← Run after every 2-3 categories verify
 topology-e2e           ← Optional: extract runtime test cases, move to e2e/
 topology-promote       ← Final: synthesize to tier docs, archive
 topology-status        ← Run at any time
 ```
+
+> **Git & PR coordination:** worktrees branch off fresh `origin/main` (git fetch first), feature work is never committed to local `main`, and branches land via `topology-merge` → PR (never `git merge` into local `main`). Run the divergence guard before starting any work. Parallel agents coordinate via the PR queue and the live coordination registry (`{DOCS_ROOT}/coordination/IN-FLIGHT.md`). Full rules: `{COMMANDS_DIR}/topology-PRINCIPLES.md § Git & PR coordination`.
 
 ## Recommended Category Execution Order
 <Derived from source material dependency analysis. Update after topology-gap runs confirm ordering.>
@@ -384,17 +500,23 @@ topology-status        ← Run at any time
 
 <Derived from execution order dependency analysis. Categories within the same group
 touch non-overlapping files and can be implemented simultaneously in git worktrees.
-topology-implement uses this section to decide when worktree isolation is needed.>
+topology-implement (and topology-dispatch in Workflow mode) use this section to decide
+when worktree isolation is needed. All worktree branches are created off fresh
+`origin/main` (git fetch first), never local `main`, and each lands via
+`/topology-merge` → PR (never a git merge into local main). Run the divergence guard
+before starting (git rev-list --count origin/main..main must be 0). Full rules:
+`{COMMANDS_DIR}/topology-PRINCIPLES.md § Git & PR coordination`.>
 
 <For each group of categories that can run in parallel, create a subsection:>
 
 ### Group 1 — <Phase or Description>
-| Category | Files Touched | Worktree Branch |
-|----------|--------------|-----------------|
+| Category | Files Touched | Worktree Branch (off origin/main) |
+|----------|--------------|-----------------------------------|
 | <cat-1> | `path/to/files/` | `{BRANCH_PREFIX}<project>/<cat-1>` |
 | <cat-2> | `path/to/files/` | `{BRANCH_PREFIX}<project>/<cat-2>` |
 
 **Isolation required:** Yes — files are in different directories with no shared modifications.
+**Landing:** each branch lands via `/topology-merge` → PR off fresh `origin/main`; never `git merge` into local `main`.
 
 ### Group 2 — <Phase or Description>
 <Same format. Categories here depend on Group 1 being merged first.>
@@ -420,8 +542,9 @@ Output a structured completion summary:
 
 **Project:** <name>
 **Root:** {PROJECTS_ACTIVE_DIR}/<project-name>/
+**Category-CLAUDE mode:** serial | parallel fan-out (runId: <runId if Workflow was used>)
 
-### Foundation Documents Created
+### Foundation Documents Created (main loop, single-author)
 - CONTRACT-SHEET.md — <N> contracts, all Proposed
 - SYSTEM-TOPOLOGY.md — <N> seams, all Proposed
 - DECISION-LOG.md — <N> seed decisions
@@ -430,6 +553,8 @@ Output a structured completion summary:
 
 ### Per-Category CLAUDE Files Created (Step 8.5)
 - categories/<slug>/CLAUDE.md — <N> category-level filtered views (one per category)
+- Touchpoint symmetry reconciled: <N> seams confirmed bilateral; <N> one-sided references patched
+- DL coverage: <N> foundational DLs confirmed in scope across affected categories
 
 ### Categories Identified
 <list with slugs>
@@ -452,8 +577,10 @@ Once reviewed, run:
 ## Important Notes
 
 - **Never guess contracts** — if source material is ambiguous about an invariant, write it as ambiguous and flag it for human review in the completion report. Do not resolve ambiguity by inventing a contract.
-- **Seams are bilateral** — both sides of a seam must be explicitly considered. Do not write a seam contract that only describes what one side needs.
-- **Foundation documents are append-only after init** — CONTRACT-SHEET.md and SYSTEM-TOPOLOGY.md are only amended through Decision Log entries. topology-init is the only time they are written from scratch.
+- **Seams are bilateral** — both sides of a seam must be explicitly considered. Do not write a seam contract that only describes what one side needs. The Step 8.6 touchpoint-symmetry reconciliation enforces this whether category CLAUDEs are authored serially or via fan-out.
+- **Foundation documents are append-only after init** — CONTRACT-SHEET.md and SYSTEM-TOPOLOGY.md are only amended through Decision Log entries; DECISION-LOG.md is append-only forever. topology-init is the only time the foundation docs are written from scratch. The category-CLAUDE authoring step and its reconciliation read these docs but never mutate them.
 - **Status is always Proposed after init** — nothing is Verified until topology-verify runs.
+- **The four foundation docs stay single-author** — only the N independent per-category CLAUDE.md files may fan out in parallel. Cross-category synthesis (contracts, seams, decisions, verification table) demands one coherent voice and stays in the main loop.
+- **No HITL, no E2E/promote boundary** — this command only creates docs. Whether serial or fan-out, no step pauses for adjudication mid-run.
 
 $ARGUMENTS

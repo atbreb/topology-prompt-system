@@ -2,6 +2,8 @@
 
 Surgical fix for a confirmed seam break. Takes the break point evidence from `topology-trace` and produces a targeted fix — scoped to the minimum change that restores the violated guarantee, nothing more. Updates the Verification Table to reflect the regression was resolved. Does not trigger a full rebuild cycle.
 
+> **See `{COMMANDS_DIR}/topology-PRINCIPLES.md`** for the design discipline. In particular: producer/consumer bilateral discipline (failure mode #3) — a patch restores one guarantee but must not break the other side of the seam; the "live patch → durable code" carve-out — a temporary live patch is fine to find the shape, but the durable fix lands in the code path in the same commit as the evidence; the foundation-document mutation discipline (DECISION-LOG append-only, VERIFICATION-TABLE mutated by commands only).
+
 ## Usage
 
 ```
@@ -15,7 +17,7 @@ Run after `topology-trace` has confirmed a specific break point. The trace repor
 ## Prerequisites
 
 - [ ] `categories/*/VERIFICATION-REPORT.md` exists for both producer and consumer categories
-- [ ] A `topology-trace` report exists for this seam (in `{PROJECTS_ACTIVE_DIR}/<project-name>/` or `{PROJECTS_ARCHIVE_DIR}/`)
+- [ ] A `topology-trace` report exists for this seam (in `{PROJECTS_ACTIVE_DIR}/<project-name>/` or `{PROJECTS_ARCHIVE_DIR}/<project-name>/`)
 - [ ] The break point is confirmed — not just suspected
 
 If no trace report exists:
@@ -163,6 +165,8 @@ To revise: tell me what to adjust in the plan.
 
 After explicit confirmation, apply each change exactly as specified in the patch plan. No scope creep — if anything adjacent looks wrong, note it but do not touch it.
 
+If you used a temporary live patch (for example, a direct data store update or a manual in-process override) to find the shape that works, that is fine for discovery — but the durable fix MUST land in the code path that produces the patch durably, in the same commit as the evidence. A live patch left as the "fix" is fragile and is not a completed patch.
+
 After all changes are applied:
 
 Run the verification steps from the patch plan against the codebase. Report each:
@@ -174,6 +178,8 @@ Run the verification steps from the patch plan against the codebase. Report each
 - [ ] <check 2>: Pass / Fail
 - [ ] <regression check>: Pass / Fail
 ```
+
+If the break point sits on a seam, prefer a scoped re-verification over ad-hoc checking: invoke `/topology-verify <project-name> <consumer-or-producer-category>` (or a scoped subset of its assertions covering this seam) so the patch is held to the same adversarial bar the seam was originally verified against. This keeps a patch from silently regressing the guarantee it claims to restore.
 
 If any verification step fails: stop, report, do not update the Verification Table.
 
@@ -196,8 +202,9 @@ If all verification steps pass:
 **Status:** Active
 ```
 
-**Create patch record:**
-`{PROJECTS_ACTIVE_DIR}/<project-name>/patches/patch-<seam-slug>-<date>.md` (or under `{PROJECTS_ARCHIVE_DIR}/<project-name>/patches/` if the project has already been archived)
+**Create patch record** in the project's patches directory:
+- Active project: `{PROJECTS_ACTIVE_DIR}/<project-name>/patches/patch-<seam-slug>-<date>.md`
+- Archived project: `{PROJECTS_ARCHIVE_DIR}/<project-name>/patches/patch-<seam-slug>-<date>.md`
 
 Copy the full patch plan and verification results into this file for traceability.
 
@@ -227,7 +234,9 @@ Run topology-integrate to confirm no adjacent seams were affected:
 - **Minimum viable fix, always.** The patch restores one guarantee. It does not improve nearby code, refactor related logic, or address other issues spotted during the trace. Those go in the backlog.
 - **Confirmation gate before applying.** The plan is always reviewed before any code is touched. No exceptions.
 - **If the scope exceeds a patch, stop.** Some breaks reveal that the original implementation was fundamentally wrong in a way a patch cannot correct. Naming this clearly is more valuable than attempting an oversized fix.
-- **topology-integrate after patching.** A patch that restores one guarantee can unknowingly stress an adjacent seam. The integration checkpoint catches this.
+- **Live patch → durable code.** A temporary live patch finds the shape; the durable fix lands in the code path in the same commit as the evidence. Never leave a live patch as the fix.
+- **Scoped re-verify for seam patches.** When a patch touches a seam, hold it to the seam's original adversarial bar via `/topology-verify` (full or a seam-scoped subset) rather than ad-hoc checking — a surgical fix must not silently regress the seam it restores.
+- **topology-integrate after patching.** A patch that restores one guarantee can unknowingly stress an adjacent seam. If the patch touched a verified seam, run `/topology-integrate` — the integration checkpoint catches regressions in neighbors that a scoped verify won't see.
 - **Patch records are permanent.** Every applied patch gets a record file, regardless of how small. These become the audit trail for future debugging sessions.
 
 ---
@@ -238,5 +247,6 @@ Run topology-integrate to confirm no adjacent seams were affected:
 |-------------|-------------|
 | `{PROJECTS_ACTIVE_DIR}` | Path to your active projects directory |
 | `{PROJECTS_ARCHIVE_DIR}` | Path to your archived projects directory |
+| `{COMMANDS_DIR}` | Path to your commands directory |
 
 $ARGUMENTS

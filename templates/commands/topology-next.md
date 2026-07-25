@@ -2,6 +2,8 @@
 
 Introspect the current topology state across all active projects, rank candidate next actions by leverage, and walk the user through the highest-value one with rationale. Can invoke other topology commands as sub-steps when doing so advances the work. Replaces the mental tax of asking "what should I do next?" with a single entry point that produces either a one-line command (brief mode) or an interactive walkthrough that ends with concrete decisions captured.
 
+> **Workflow-era awareness:** when another topology command's CHECKPOINT carries a workflow `runId`, the right recommendation is `/topology-resume <project>` (which re-invokes the workflow with `resumeFromRunId`) — cached stages return instantly and only the unblocked work re-runs. This command itself is read-heavy/write-light and does **not** author a Workflow script; orchestration belongs to `/topology-sprint` and `/topology-autopilot`.
+
 ## Usage
 
 ```
@@ -18,7 +20,7 @@ Introspect the current topology state across all active projects, rank candidate
 - `--brief` — Return a single line: the next recommended command the user should run. No rationale, no sub-invocation, no file writes.
 - `--batch` — Interactive walkthrough, but defer all sub-command invocations until the end. Answer everything first, then commit as a batch.
 - `--focus <project-name>` — Prioritize next actions inside the named project. Other projects are still scanned (for cross-project context) but their work is ranked lower.
-- `--skip <kind>` — Omit a category from candidate ranking. Valid kinds: `dl-proposals`, `security-gates`, `paused-sprints`, `integration-checkpoints`, `e2e-readiness`.
+- `--skip <kind>` — Omit a category from candidate ranking. Valid kinds: `dl-proposals`, `security-gates`, `paused-sprints`, `resumable-workflows`, `integration-checkpoints`, `e2e-readiness`.
 - `--dry-run` — Analyze state, surface the recommendation with full rationale, but never invoke another command. User sees what would happen without it happening.
 
 ---
@@ -35,39 +37,44 @@ Sources to read:
    - `ls {PROJECTS_ACTIVE_DIR}/*/TOPOLOGY-CLAUDE.md` — which projects exist
    - For each: read TOPOLOGY-CLAUDE's categories table (status column)
 
-2. **Paused autopilots**
+2. **Resumable workflows**
+   - `{PROJECTS_ACTIVE_DIR}/*/sprints/*/CHECKPOINT.md` and `{PROJECTS_ACTIVE_DIR}/*/autopilot/CHECKPOINT.md` — parse the **workflow `runId`** field
+   - A non-null `runId` paired with a `status` of `paused` / `needs-hitl` means an in-flight workflow exists that can be resumed via `resumeFromRunId`. Record `runId`, `current_category`, `current_phase`/stage, `hitl_reason`, and which gate(s) are outstanding.
+   - This is the machine-resumable record — prefer it over reconstructing state from scratch.
+
+3. **Paused autopilots**
    - `{PROJECTS_ACTIVE_DIR}/*/autopilot/CHECKPOINT.md` — parse `status` field
-   - If paused: read the full checkpoint to understand the pivot state + DL proposal inventory
+   - If paused: read the full checkpoint to understand the pivot state + DL proposal inventory + the workflow `runId` (per source 2)
 
-3. **Paused sprints**
+4. **Paused sprints**
    - `{PROJECTS_ACTIVE_DIR}/*/sprints/*/CHECKPOINT.md` — parse `status` field
-   - For each paused sprint: record `hitl_reason`, `current_category`, `current_phase`, `proposed_decisions`
+   - For each paused sprint: record `hitl_reason`, `current_category`, `current_phase`, `proposed_decisions`, and the workflow `runId`
 
-4. **Pending DL proposals** (authoritative source: sprint / autopilot CHECKPOINT.md files; detailed bodies: Implementation Plan "Open Decisions" sections)
-   - Scan every `<topology-result>` block in `{PROJECTS_ACTIVE_DIR}/*/categories/*/` for `hitl_trigger` non-null
+5. **Pending DL proposals** (authoritative source: sprint / autopilot CHECKPOINT.md files; detailed bodies: Implementation Plan "Open Decisions" sections)
+   - Scan every structured `needs-hitl` result captured in sprint/autopilot CHECKPOINTs and `categories/*/` for proposed decisions with `hitl.reason` non-null
    - Scan Implementation Plan files for "Open Decisions Requiring DL Entries" section
    - Reconcile duplicates — a proposal mentioned in a CHECKPOINT is the same entity as its detailed body in an Implementation Plan
 
-5. **Security-sensitive gates**
-   - Same scan, filtered by `hitl_trigger: security-sensitive-change`
+6. **Security-sensitive gates**
+   - Same scan, filtered by `hitl.reason: security-sensitive-change`
 
-6. **Verified vs unverified categories**
+7. **Verified vs unverified categories**
    - `{PROJECTS_ACTIVE_DIR}/*/VERIFICATION-TABLE.md` — parse cell states
    - Count Verified ✓ per row; identify fully-verified categories vs partial vs blank
 
-7. **Integration checkpoints pending**
+8. **Integration checkpoints pending**
    - For every group where all categories have Verified ✓: check if `{PROJECTS_ACTIVE_DIR}/<project>/integration-checkpoints/CP<N>-*.md` exists
    - If not: that group needs an integration checkpoint
 
-8. **E2E / promote readiness**
+9. **E2E / promote readiness**
    - A project is E2E-ready if all its categories are Verified ✓ and all integration checkpoints pass
    - Never auto-suggest past this boundary — surface as "you could now run /topology-e2e"
 
-9. **Working tree state**
-   - `git status --short` to detect uncommitted changes
-   - If uncommitted: classify as (a) documentation from a prior run (expected), (b) mid-implementation (resume target), (c) dirty state requiring user attention
+10. **Working tree state**
+    - `git status --short` to detect uncommitted changes
+    - If uncommitted: classify as (a) documentation from a prior run (expected), (b) mid-implementation (resume target), (c) dirty state requiring user attention
 
-10. **DECISION-LOG freshness**
+11. **DECISION-LOG freshness**
     - Cross-reference pending DL proposals with existing DECISION-LOG entries — if a proposal ID (e.g., `DL-PROP-1`) was already approved, mark it resolved; don't re-surface
 
 ### Step 2: Rank candidate next actions
@@ -78,7 +85,7 @@ Generate a ranked list of candidate actions. Ranking is deterministic; ties are 
 
 1. **External-lead-time items** — any DL proposal that requires external action (cloud provisioning, vendor account setup, purchase orders, user-managed secrets). Even if they don't unblock the most downstream work, starting them first minimizes total wall time. Detect via keywords in proposal body that signal an external dependency: e.g., a cloud provider name, a managed-service subscription, the secrets tool, "external", "portal", "provisioning".
 
-2. **Security-sensitive gates** — `hitl_trigger: security-sensitive-change`. Typically take the longest to review (require human judgment, cross-team review, architectural read). Surface early even if blocking-impact is modest.
+2. **Security-sensitive gates** — `hitl.reason: security-sensitive-change`. Typically take the longest to review (require human judgment, cross-team review, architectural read). Surface early even if blocking-impact is modest.
 
 3. **DL proposals ranked by unblocking impact** — compute "unblocking weight" per proposal:
    - +10 if it unblocks a whole phase
@@ -88,17 +95,17 @@ Generate a ranked list of candidate actions. Ranking is deterministic; ties are 
    - -1 if it is produced by a future phase (cosmetic — documented for visibility, not actionable yet)
    Sort descending; surface top N (default 3).
 
-4. **Paused sprints ready to resume** — a sprint is resume-ready when its CHECKPOINT's blocking dependencies are all satisfied. Run `/topology-resume` (or recommend it in `--brief`).
+4. **Resumable workflows ready to resume** — a paused sprint/autopilot whose CHECKPOINT carries a workflow `runId` and whose blocking gate(s) are now satisfied (all cited DL proposals approved, external dep reachable). Recommend `/topology-resume <project>` — it re-invokes the workflow with `resumeFromRunId` so cached stages return instantly and only the unblocked category/group re-runs. Prefer this over re-running a sprint from scratch.
 
 5. **Integration checkpoints pending** — if a group is fully verified but has no CP file, run `/topology-integrate`.
 
-6. **Verified categories accumulating without integration** — same as above but scan cross-sprint (e.g., {EXAMPLE_PROJECT_SLUG} G1 + G2 both verified but no consolidated integration).
+6. **Verified categories accumulating without integration** — same as above but scan cross-sprint (e.g., `{EXAMPLE_PROJECT_SLUG}` G1 + G2 both verified but no consolidated integration).
 
 7. **E2E readiness boundary** — project fully verified, all integrations clean. Surface as "ready for `/topology-e2e`" but never auto-invoke.
 
 8. **Promote readiness boundary** — after E2E runs clean, surface as "ready for `/topology-promote`" but never auto-invoke.
 
-9. **Idle — all clean** — no paused work, no pending decisions, nothing to integrate. Suggest starting a new group via `/topology-sprint` or taking stock via `/topology-status`.
+9. **Idle — all clean** — no paused work, no pending decisions, nothing to integrate. Suggest starting a new group via `/topology-sprint` (single-group) or `/topology-autopilot` (multi-group), or taking stock via `/topology-status`.
 
 ### Step 3: Mode branch
 
@@ -106,18 +113,24 @@ Generate a ranked list of candidate actions. Ranking is deterministic; ties are 
 Output a single line: the next command the user should run, with minimal context. No file writes. No sub-command invocation. Exit.
 
 Example brief outputs:
+
+{{! example }}
 ```
-Run: /topology-decide {EXAMPLE_PROJECT_SLUG} DL-PROP-1 --approve  # external provisioning has lead time
+Run: /topology-decide {EXAMPLE_PROJECT_SLUG} DL-PROP-3 --approve  # external provisioning has lead time
 ```
 ```
-Run: /topology-resume {EXAMPLE_PROJECT_SLUG}  # all pending DLs are approved; sprint is ready
+Run: /topology-resume {EXAMPLE_PROJECT_SLUG}  # runId in CHECKPOINT; all pending DLs approved — workflow resumes from the blocked stage
 ```
 ```
 Run: /topology-integrate {EXAMPLE_PROJECT_SLUG}  # G1 verified; CP-G1 pending
 ```
 ```
+Run: /topology-autopilot {EXAMPLE_PROJECT_SLUG} --through-group 2  # nothing started; multi-group orchestration is the fastest path
+```
+```
 (all clean — run /topology-status for a full dashboard, or /topology-sprint-plan for new work)
 ```
+{{! /example }}
 
 **If `--dry-run`:**
 Produce the full interactive walkthrough synthesis (Step 4's output) but never invoke sub-commands. The user sees the rationale and the *would-invoke* plan without any state change.
@@ -128,18 +141,24 @@ Produce the full interactive walkthrough synthesis (Step 4's output) but never i
 
 Before invoking any sub-command, produce the synthesis outputs — these are unique to `/topology-next` and cost nothing but save real cognitive load.
 
-1. **"Where you are" paragraph** — 2-3 sentences merging state across all projects. If multiple projects are active, lead with the primary (per Step 8's primary-project selection rule) and note others as context. Example: *"Both projects have paused at phase-plan — {EXAMPLE_PROJECT_SLUG}'s {EXAMPLE_CATEGORY_SLUG} and all three of the other project's Group 1 categories. 13 DL proposals are pending across 4 categories, plus one security gate on a DB schema. No commits since the autopilot run at 18:30."*
+1. **"Where you are" paragraph** — 2-3 sentences merging state across all projects. If multiple projects are active, lead with the primary (per Step 8's primary-project selection rule) and note others as context. Call out any in-flight workflow `runId` explicitly.
+
+   {{! example }}
+   *"Both projects have paused at phase-plan — `{EXAMPLE_PROJECT_SLUG}`'s `{EXAMPLE_CATEGORY_SLUG}` and all three of the other project's Group 1 categories. The first project's sprint workflow (runId `<runId>`) is mid-pipeline and resumable. 13 DL proposals across 4 categories are pending, plus one security gate on a DB schema. No commits since the autopilot run at 18:30."*
+   {{! /example }}
 
 2. **Do-first table** — ranked candidate actions with context:
 
+   {{! example }}
    ```
    | # | Action                                                    | Why now                                        | Est. time |
    |---|-----------------------------------------------------------|------------------------------------------------|-----------|
    | 1 | Decide DL-PROP-3 (external deployment specifics)          | External lead time — start provisioning async  | 15m now + external |
    | 2 | Decide DL-PROP-1, 2 (external probe + config)             | Unblocks {EXAMPLE_CATEGORY_SLUG} Phases 1-2    | 10m       |
-   | 3 | Review security gate: DB schema migration                 | Longest review cycle; also blocks Phase 2 PO   | 20-30m    |
-   | 4 | Decide DL-PROP-4..6 (sibling category)                    | Unblocks a clean category in the other project | 15m       |
+   | 3 | Resume sprint workflow `<runId>` (/topology-resume)       | Cached stages return; only blocked cat re-runs | 5m + run  |
+   | 4 | Review security gate: DB schema migration                 | Longest review cycle; also blocks Phase 2 PO   | 20-30m    |
    ```
+   {{! /example }}
 
 3. **Decision dependency graph** — which DL proposals unblock which phases / categories / seams. A compact diagram or table that makes the implication of each choice legible.
 
@@ -158,7 +177,7 @@ For each DL proposal selected (in the agreed order):
    - What prior decisions (existing DECISION-LOG entries) constrain this one
    - What sibling project decisions relate
 
-2. **Proposed body** — from the Implementation Plan's Open Decisions section, verbatim
+2. **Proposed body** — from the Implementation Plan's Open Decisions section (or the CHECKPOINT's `proposedDecisions` HITL payload), verbatim
 
 3. **Alternatives** — surface the alternatives considered, even if the proposal has a recommended choice
 
@@ -177,22 +196,24 @@ Obey these tiers when considering whether to invoke another topology command:
 | **Read-only** | `/topology-status`; raw file reads (CHECKPOINT, VERIFICATION-TABLE) | Invoke freely, no confirmation |
 | **Writes review artifacts** | `/topology-current-state` (re-run for drift); `/topology-gap` (re-run after dependent category verifies) | Propose + single confirmation before invoking |
 | **Mutates tracked state** | `/topology-decide`; `/topology-resume`; `/topology-integrate` | Propose + confirm + batch where possible |
-| **Enters implementation** | Any phase-E work (via `/topology-implement`) | Never auto-invoke; always HITL |
+| **Enters implementation** | Any phase-E work (via `/topology-implement`, `/topology-sprint`, `/topology-autopilot`) | Never auto-invoke; always HITL |
 | **E2E or promote** | `/topology-e2e`; `/topology-promote` | Never auto-invoke; always HITL |
 
 **Batching rule for `/topology-decide`:** accumulate multiple decisions into a single confirmation. Example: *"I have your answers for DL-PROP-1 (approve), 2 (amend with a budget cap), 3 (approve), 4 (approve), 5 (approve). Ready to write 5 DECISION-LOG entries?"* → single ACK → invoke `/topology-decide` 5 times back-to-back.
 
 **Default mode** executes the batch after each logical group (e.g., all proposals within one category). `--batch` mode defers all execution until the full walkthrough completes.
 
+**Resume after decisions land:** once a paused workflow's gating DL proposals are all approved, the right follow-up is `/topology-resume <project>` — the main loop re-invokes the sprint/autopilot workflow with `resumeFromRunId: <runId>` (cached stages return instantly; only the unblocked category/group re-runs). Recommend it; never auto-enter implementation.
+
 ### Step 7: Nested HITL loop
 
-If a sub-command invocation itself hits a HITL gate:
+If a sub-command invocation itself hits a HITL gate (returns a `needs-hitl` result):
 
-1. Capture the new HITL trigger in-memory
+1. Capture the new HITL trigger in-memory (reason + proposedDecisions + the workflow `runId`)
 2. Return control to `/topology-next`
-3. Re-run Step 1 (state detection) — the paused state will now include the new gate
+3. Re-run Step 1 (state detection) — the paused state will now include the new gate and its resumable `runId`
 4. Re-run Step 2 (ranking) — new gate gets ranked against everything else
-5. Present: *"After running /topology-resume, the sprint paused again at [phase] with [trigger]. Here's the new top recommendation: ..."*
+5. Present: *"After running /topology-resume, the workflow paused again at [stage] on [category] with [reason]. Here's the new top recommendation: ..."*
 
 This makes the command a genuine walker through multi-blocker state — user stays in one flow even as the sub-commands generate more decisions.
 
@@ -259,11 +280,11 @@ Before exiting an interactive session, emit:
 **Decisions landed:** <N>
 **DL entries added to DECISION-LOG:** <list with IDs>
 **Sub-commands invoked:** <list>
-**Paused-state transitions:** <summary — e.g., "{EXAMPLE_PROJECT_SLUG} {EXAMPLE_CATEGORY_SLUG}: paused-hitl → implement-ready">
+**Paused-state transitions:** <summary — e.g., "{EXAMPLE_PROJECT_SLUG} {EXAMPLE_CATEGORY_SLUG}: paused-hitl → resumable (runId <runId>)">
 
 **Still pending:** <what remains>
 
-**Suggested next:** `/topology-resume <project>` / `/topology-next` (if more decisions to make) / `/topology-integrate <project>` / etc.
+**Suggested next:** `/topology-resume <project>` (if a resumable runId is now unblocked) / `/topology-next` (if more decisions to make) / `/topology-integrate <project>` / etc.
 
 **Decision walkthrough saved:** `{PROJECTS_ACTIVE_DIR}/<project>/autopilot/DECISIONS-<timestamp>.md`
 ```
@@ -274,21 +295,21 @@ Before exiting an interactive session, emit:
 
 ### Scenario A: Multiple paused sprints with 10+ pending DLs
 
-State at entry: Two projects both at phase-plan paused after an autopilot run; 13 DL proposals across 4 categories.
+State at entry: Two projects both at phase-plan paused after an autopilot run; 13 DL proposals across 4 categories; each CHECKPOINT carries a workflow `runId`.
 
-Action: Surface synthesis + ranked do-first table. Walk through decisions in external-lead-time → unblocking-impact order. Execute in batches per category. Likely end state: many decisions landed; suggest `/topology-resume` for each unblocked project.
+Action: Surface synthesis + ranked do-first table. Walk through decisions in external-lead-time → unblocking-impact order. Execute in batches per category. Likely end state: many decisions landed; recommend `/topology-resume <project>` for each unblocked workflow (resumes from the blocked stage via `resumeFromRunId`, not from scratch).
 
 ### Scenario B: All categories verified; no integration checkpoint
 
 State at entry: All categories in Group 1 Verified ✓, but `integration-checkpoints/CP1-*.md` doesn't exist.
 
-Action: Surface *"You have a clean Group 1 but CP1 is pending. Run integration?"* → confirm → invoke `/topology-integrate`. If integration passes, recommend Group 2 start. If it fails, surface the violation and rank the fix as top action.
+Action: Surface *"You have a clean Group 1 but CP1 is pending. Run integration?"* → confirm → invoke `/topology-integrate`. If integration passes, recommend Group 2 start via `/topology-sprint --group 2` (or `/topology-autopilot --through-group N` for a multi-group run). If it fails, surface the violation and rank the fix as top action.
 
 ### Scenario C: Mid-implementation working tree dirty
 
-State at entry: `git status` shows modified source files; a sprint has `current_phase: implement`.
+State at entry: `git status` shows modified source files; a sprint has `current_phase: implement` and a live workflow `runId`.
 
-Action: Surface *"Looks like you're mid-implementation on [category]. Want to continue (run tests, check drift) or step back (review what's changed)?"* Do NOT auto-commit. Do NOT auto-resume. This is the user's active work; respect their state.
+Action: Surface *"Looks like a sprint workflow is mid-implementation on [category]. Want to continue (`/topology-resume`) or step back (review what's changed)?"* Do NOT auto-commit. Do NOT auto-resume. This is the user's active work; respect their state.
 
 ### Scenario D: All green, everything verified
 
@@ -300,7 +321,7 @@ Action: Surface E2E / promote readiness. Explicitly note these are human-initiat
 
 State at entry: TOPOLOGY-CLAUDE exists; categories all "Not Started"; no sprints.
 
-Action: Surface *"No sprints started yet. Recommended first move: `/topology-autopilot <project> --through-group 1` (or `/topology-sprint-plan <project> --group 1` for a review-first approach)."*
+Action: Surface *"No sprints started yet. Recommended first move: `/topology-autopilot <project> --through-group 1` (multi-group orchestration — fastest path) or `/topology-sprint-plan <project> --group 1` for a review-first approach."*
 
 ### Scenario F: Drift detected in an already-analyzed category
 
@@ -308,17 +329,24 @@ State at entry: A category has `CURRENT-STATE.md` with `last_analyzed_commit_sha
 
 Action: Surface *"`<category>` was last analyzed at commit X; N commits since have modified M files in its scope. Recommend re-running `/topology-current-state` before advancing. Run it now?"* → confirm → invoke.
 
+### Scenario G: Resumable workflow with all gates satisfied
+
+State at entry: A sprint CHECKPOINT carries `status: paused`, a workflow `runId`, and a single `hitl.reason: dl-entry-proposed-strict-mode` whose proposed DL was already approved in DECISION-LOG (per Step 1 source 11).
+
+Action: Surface *"`{EXAMPLE_PROJECT_SLUG}`'s sprint workflow (runId `<runId>`) is resumable — its only gate is already approved in the DECISION-LOG. Resume now?"* → confirm → invoke `/topology-resume {EXAMPLE_PROJECT_SLUG}`. The cached analyze/plan stages return instantly; only the unblocked Build stage onward re-runs.
+
 ---
 
 ## Important Notes
 
 - **Command scope is topology only.** Do not reason about non-topology state (unrelated git branches, CI pipelines, random repo files). If `git status` shows changes unrelated to active topology work, mention them and move on.
-- **Read-heavy, write-light.** The only files this command writes directly are the DECISIONS-<timestamp>.md walkthrough trace. All tracked state mutations happen via invoking other commands (`/topology-decide`, etc.), preserving their conventions.
+- **Read-heavy, write-light.** The only files this command writes directly are the DECISIONS-<timestamp>.md walkthrough trace. All tracked state mutations happen via invoking other commands (`/topology-decide`, etc.), preserving their conventions. This command does **not** author a Workflow script — orchestration belongs to `/topology-sprint` and `/topology-autopilot`.
+- **Resume over re-run.** When a CHECKPOINT carries a workflow `runId`, prefer recommending `/topology-resume <project>` (which re-invokes the workflow with `resumeFromRunId`) over re-running a sprint/autopilot from scratch — cached stages return instantly and only the unblocked work re-runs.
 {{#if MULTI_AGENT}}
-- **No {DELEGATE_AGENT_NAME} Pair Mode on this command.** The synthesis work is judgment-dense; {DELEGATE_AGENT_NAME}'s strengths (bulk file scans, mechanical enumeration) don't fit. State detection is fast on the main Claude. If future usage shows scaling pain, add {DELEGATE_AGENT_NAME} mode then.
+- **No {DELEGATE_AGENT_NAME} Pair Mode on this command.** The synthesis work is judgment-dense; {DELEGATE_AGENT_NAME}'s strengths (bulk file scans, mechanical enumeration) don't fit. State detection is fast on the main agent. If future usage shows scaling pain, add {DELEGATE_AGENT_NAME} mode then.
 {{/if}}
 - **Always show your work.** Rationale, alternatives, and downstream impact for every recommendation. User must be able to override without explanation.
-- **Never paternalistic.** If the user says "show me DL-PROP-7 instead" out of order, accept and re-rank. If the user says "I want to defer all 13 and look at status first," defer and invoke `/topology-status`.
+- **Never paternalistic.** If the user says "show me a different proposal instead" out of order, accept and re-rank. If the user says "I want to defer all 13 and look at status first," defer and invoke `/topology-status`.
 - **`--brief` is for muscle memory.** Once the user knows this command, `/topology-next --brief` becomes their daily startup incantation — "remind me what I'm doing." Keep its output single-line and parseable.
 - **Don't duplicate `/topology-status`.** Status shows state across everything in structured form. `/topology-next` goes one level further: "given that state, here's what matters next." When unsure which to use, surface both options.
 - **Audit trail goes in DECISIONS-<timestamp>.md, not DECISION-LOG.** DECISION-LOG is for approved-and-landed entries. The walkthrough trace captures the *conversation* — useful for retrospectives and for re-entering a session partway through.
@@ -333,4 +361,7 @@ Action: Surface *"`<category>` was last analyzed at commit X; N commits since ha
 | `<primary-project>` | Project with the most active / most-recently-touched work |
 | `<YYYYMMDD-HHMM>` | Timestamp of the /topology-next session start |
 | `<category>` | Category slug being discussed |
+| `<runId>` | Workflow run identifier from a sprint/autopilot CHECKPOINT |
 | `<N>` | Numeric count |
+
+$ARGUMENTS

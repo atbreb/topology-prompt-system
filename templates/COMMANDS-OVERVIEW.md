@@ -22,10 +22,13 @@
 | `topology-autopilot` | N groups / N projects | Chains sprints across groups and (optionally) projects. Writes an overarching integration strategy. Pivots cross-project on inference when `--cross-project` is enabled. |
 | `topology-resume` | 1 paused run | Picks up a sprint or autopilot from its last checkpoint after HITL decisions are recorded. |
 | `topology-decide` | 1 decision | Human records a HITL decision (approve/reject/defer). Unblocks paused runs. Writes to DECISION-LOG on approve. |
+| `topology-eval` | 1 skill/command | Eval-gates a topology command or skill change: runs it k times against a fixed fixture, grades deterministically (pass@k / pass^k), and writes a result log. Blocks a skill merge if the bar is not met. |
+| `topology-self-audit` | the harness itself | Runs the project harness self-audit script and surfaces a maturity scorecard across seven dimensions (lockdown-coverage, write-time-guards, eval-coverage, memory-health, decision-ledger, cost-knobs, doc-tier-presence). Script is source of truth; no LLM re-grading. |
 
 ## Core design principles
 
 1. **Strict autonomy by default.** Every proposed DECISION-LOG entry pauses for HITL unless explicitly overridden. Contract and seam amendments ALWAYS pause regardless of autonomy level.
+1a. **Workflow-orchestration substrate.** Every command carries a deterministic Workflow-script path alongside the prose-mode path. Workflow scripts use typed structured output (PHASE_RESULT, CATEGORY_RESULT, HITL, FINDING, VERDICT, SEAM_CHECK, DISCOVERY_ITEM schemas). Paused runs resume from a cached runId — only unblocked stages re-run. Prose-mode is fully preserved for environments without the Workflow tool.
 2. **Auto-commit on verify green.** During a category's execution: implementation commits per phase plan unit; docs commit (CURRENT-STATE + GAP + PHASE-PLAN + FUTURE-STATE + VERIFICATION-REPORT) bundled into one `chore(topology): <category> verified` commit at the end.
 3. **Integration strategy is inferred and written upfront.** Multi-category commands (`topology-sprint`, `topology-autopilot`) produce an integration plan as part of their sprint plan doc. Triggers are declared, not ad-hoc.
 4. **Drift detection is automatic.** If `topology-current-state` detects significant drift from prior analysis, it auto-runs `gap → phase-plan → future-state` afresh before implementation — no HITL needed for drift-triggered re-analysis.

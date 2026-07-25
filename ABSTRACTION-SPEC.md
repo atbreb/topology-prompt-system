@@ -412,3 +412,13 @@ The same algorithm runs for `compass-prompt-system/templates/commands/` when
   rule; `USE_SUBAGENTS`/`SUBAGENT_TYPES` now `auto`). Froze `compass-update` as the weekly workflow
   command in the naming contract (§7), resolving the bootstrap-vs-cadence collision. Ships with
   semantic update `updates/0002-add-teaching-stance`.
+- **v1.2.0** — (2026-06-06) Added the **Workflow-orchestration substrate** to every topology
+  command and introduced two new harness commands (`topology-eval`, `topology-self-audit`).
+  No new *profile* tokens. New runtime vocabulary (not substituted by the compiler — these are
+  schema/method names used inside Workflow scripts and left literal per the closed-vocabulary
+  rule): `pipeline()`, `parallel()`, `agent()`, `runId`, `resumeFromRunId()`, `budget.total`,
+  `budget.remaining()`, and the shared schema names (`PHASE_RESULT`, `CATEGORY_RESULT`, `HITL`,
+  `FINDING`, `VERDICT`, `SEAM_CHECK`, `DISCOVERY_ITEM`, `COMPLETENESS`, `GAP`, `AREA_SLICE`,
+  `DOC_EDIT`, `E2E_TESTCASE`, `HOP_EVIDENCE`, `CATEGORY_CLAUDE`). These are methodology
+  vocabulary — treat them as system constants (§3 "What NOT to tokenize") alongside the
+  foundation-doc filenames. Ships with semantic update `updates/0003-add-workflow-orchestration`.

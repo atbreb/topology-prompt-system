@@ -2,6 +2,8 @@
 
 Follows a specific data flow through the seam contracts step by step against the actual codebase. Where `topology-diagnose` identifies candidate seams, `topology-trace` walks one specific flow end to end and finds the exact point where the chain breaks — the file, the function, the condition. Produces evidence ready for `topology-patch`.
 
+> **See `{COMMANDS_DIR}/topology-PRINCIPLES.md`** for the doctrine and the shared schema library. The Workflow-era addition: a flow that crosses multiple categories is a read-only multi-hop analysis, so trace MAY fan out one read-only `Explore` agent per hop (Workflow Pattern 3, find side only — no refutation panel) to gather each hop's evidence concurrently, with the main loop assembling the ordered chain and adjudicating the first break. The fan-out is **optional** — trace still works as a plain sequential read. Like `topology-integrate`, the workflow is **strictly read-only**: it never mutates files, and all break-point adjudication stays in the main loop.
+
 ## Usage
 
 ```
@@ -58,6 +60,63 @@ Follow the specific data flow described in the argument through the code, step b
 4. **Check for silent failures** — is there any code path where the step fails without surfacing a typed error?
 
 Continue step by step through the full chain from producer emission to consumer consumption.
+
+#### Optional: fan out the hops (when the flow crosses categories)
+
+If the flow passes through **three or more code areas / categories** (e.g. producer category → a relay/worker category → consumer category), gathering each hop's evidence is independent read-only work and can run concurrently. Decompose the flow into ordered hops first (one per category boundary or per handler the data passes through), then author the script and call `Workflow` (the opt-in). One `Explore` agent per hop, all concurrent; the main loop re-orders the returned `HOP_EVIDENCE` by `index` and walks the assembled chain in Step 4.
+
+```js
+export const meta = {
+  name: 'topology-trace',
+  description: 'Gather per-hop evidence for one data flow across categories, in parallel; main loop assembles the chain',
+  phases: [{ title: 'WalkHops', detail: 'one read-only agent per hop along the traced flow' }],
+}
+
+// Evidence for one hop of the traced flow. Inline, self-contained (workflow scripts do not import).
+const HOP_EVIDENCE = {
+  type: 'object',
+  required: ['index', 'location', 'input', 'output', 'contractStatus'],
+  properties: {
+    index:            { type: 'integer' },                          // position in the ordered chain (0-based)
+    location:         { type: 'string' },                           // "file:function" + line range
+    mechanism:        { enum: ['message-broker', 'api-call', 'db-write', 'db-read', 'kv', 'function-return', 'other'] },
+    input:            { type: 'string' },                           // value/event/state entering this hop
+    output:           { type: 'string' },                           // value/event/state leaving this hop
+    contractStatus:   { enum: ['honored', 'violated', 'conditional', 'n/a'] },
+    breakType:        { enum: ['missing-emission', 'wrong-structure', 'silent-failure', 'over-reliance',
+                               'conditional-guarantee', 'sequencing-violation', 'partial-write', 'none'] },
+    triggerCondition: { type: 'string' },                           // when it breaks: always / specific input / error path / race
+    evidence:         { type: 'string' },                           // file:line — the specific code logic (required)
+    upstreamSuspected: { type: 'boolean' },                         // is this break likely caused by a prior hop?
+  },
+}
+
+const { project, seamSlug, flow, contract, hops } = args
+// hops: [{ index, area, hint }] — one ordered hop per category/handler the flow passes through
+
+phase('WalkHops')
+const evidence = await parallel(hops.map(h => () =>
+  agent(
+    `Read-only trace of ONE hop in a data flow (project ${project}, seam ${seamSlug}).\n` +
+    `Full flow being traced: "${flow}"\n` +
+    `Seam contract (from SYSTEM-TOPOLOGY.md):\n${contract}\n\n` +
+    `Your hop is index ${h.index}: ${h.area}. Hint: ${h.hint}\n\n` +
+    `For THIS hop only:\n` +
+    `- Locate the exact code path (file:function, line range) the data passes through here.\n` +
+    `- Identify what enters this hop and what exits it.\n` +
+    `- Check it against the seam contract: is the relevant guarantee honored, violated, or conditional at this step?\n` +
+    `- Look hardest for SILENT FAILURES — error paths caught and logged but not propagated as a typed error.\n` +
+    `- If it breaks, classify breakType and the exact triggerCondition, and say whether the cause is likely upstream (a prior hop).\n` +
+    `- Cite file:line evidence for whatever you conclude (required for honored AND violated).\n` +
+    `Return a HOP_EVIDENCE. Do NOT modify any files — you are strictly read-only.`,
+    { label: `hop:${h.index}`, phase: 'WalkHops', schema: HOP_EVIDENCE, agentType: 'Explore' }
+  )
+))
+
+return evidence.filter(Boolean).sort((a, b) => a.index - b.index)
+```
+
+Pass `args: { project, seamSlug, flow, contract, hops }`. The workflow only gathers per-hop evidence; the main loop still owns Step 4 (deciding the first confirmed break) and Step 5 (upstream-cause adjudication) — those are judgment calls, not fan-out work. For a short two-hop producer→consumer flow, skip the workflow entirely and walk it sequentially.
 
 ### Step 4: Identify Break Points
 
@@ -195,10 +254,11 @@ This means either:
 ## Important Notes
 
 - **Walk the actual code, not the intended code.** The future-state and verification documents describe what should be true. The trace follows what is true. Discrepancies between them are findings.
-- **Silent failures are the most common break type.** Look especially for error paths where exceptions are caught and logged but not propagated as typed errors — these are the mechanism that makes events disappear silently (e.g., a billing event that is emitted on the happy path but swallowed on the error path).
+- **Silent failures are the most common break type.** Look especially for error paths where exceptions are caught and logged but not propagated as typed errors — these are the mechanism that makes events disappear silently (e.g., a billing event emitted on the happy path but swallowed on the error path).
 - **Conditional guarantees are subtle.** A guarantee that says "always" but has an edge case where it doesn't fire is a violation. The condition that triggers the violation is as important as the violation itself.
-- **Stop at the first confirmed break point.** Once the chain is broken, downstream behavior is unreliable and tracing further produces noise. Fix the first break, then re-trace.
+- **Stop at the first confirmed break point.** Once the chain is broken, downstream behavior is unreliable and tracing further produces noise. Fix the first break, then re-trace. (When fanning out hops, this means the main loop adjudicates the *lowest-index* `violated`/`conditional` hop as the break — the parallel agents gather evidence, they do not each declare "the" break independently.)
 - **If the chain appears intact but the symptom persists**, the break is likely in the runtime environment rather than the static code — message-broker delivery, database write ordering, race conditions under load. Note this explicitly in the report.
+- **The fan-out is optional and strictly read-only.** A multi-hop flow may use the Workflow to gather per-hop evidence concurrently, but a simple two-hop producer→consumer trace should just be walked sequentially. Either way, no agent mutates the tree — all break-point adjudication and report writing happen in the main loop.
 
 ---
 
@@ -206,7 +266,8 @@ This means either:
 
 | Placeholder | Replace With |
 |-------------|-------------|
-| `{API_STYLE}` | Your service-call style (e.g., gRPC, REST, GraphQL) |
+| `{API_STYLE}` | Your service-call style (e.g., REST, gRPC, GraphQL) |
 | `{DATABASE}` | Your database (e.g., Postgres, MySQL, SQLite) |
+| `{COMMANDS_DIR}` | Path to your commands directory (e.g., `.claude/commands`) |
 
 $ARGUMENTS

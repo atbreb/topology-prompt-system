@@ -1,6 +1,10 @@
 # topology-merge
 
-Merge completed category worktree branches back into the main branch. This command handles the sequential merge of one or more topology worktree branches, running build and test verification between each merge to catch integration issues early.
+Land completed category worktree branches **via GitHub PR** off a fresh `origin/main`. This command handles the sequential landing of one or more topology worktree branches, running build and test verification on each branch, then pushing it and opening a PR. It **never** `git merge`s a feature branch into local `main` — PRs merge on the remote host in a safe order.
+
+> **See `{COMMANDS_DIR}/topology-PRINCIPLES.md` § Git & PR coordination (MANDATORY).** Topology work is branch-per-feature off fresh `origin/main`, landed via PR; feature work is never committed or merged into local `main`. This command is the canonical "land" step that enforces that doctrine.
+
+This is a git/PR mechanics command — it carries **no agent fan-out and needs no Workflow script**. It is invoked by `topology-verify` (auto-merge on Full Pass), `topology-sprint`, `topology-dispatch`, and `topology-autopilot` to land worktree branches after they complete their verification gates.
 
 ## Usage
 
@@ -17,20 +21,25 @@ Merge completed category worktree branches back into the main branch. This comma
 
 ## Prerequisites
 
-- [ ] Must be on the main branch (not inside a worktree)
+- [ ] Must be on a synced local `main` (not inside a worktree). Local `main` MUST equal `origin/main` — `git fetch origin && git rev-list --count origin/main..main` must be `0`. If not, STOP and reconcile per PRINCIPLES § Git & PR coordination (rule 3) before landing.
+- [ ] `gh` CLI available and authenticated (`gh auth status`) — landing is via `gh pr create`
 - [ ] `TOPOLOGY-CLAUDE.md` exists and has a `Parallel Groups` section
-- [ ] At least one topology worktree branch exists with commits ahead of main
+- [ ] At least one topology worktree branch exists with commits ahead of `origin/main`
 
 If inside a worktree, stop and report:
 
 > You are currently inside a worktree. Exit the worktree first with ExitWorktree,
 > then run topology-merge from the main branch.
 
+If `gh` is unavailable, stop and report that landing requires the GitHub CLI (push the branch manually and open the PR in the repository's web UI as a fallback — but never `git merge` into local `main`).
+
 ---
 
 ## Instructions
 
 ### Step 1: Discover Worktree Branches
+
+First `git fetch origin` so all comparisons are against fresh `origin/main`. The project's commits must live on a `{BRANCH_PREFIX}<project>/...` branch off `origin/main` — never on local `main`.
 
 List all branches matching the pattern `{BRANCH_PREFIX}<project-name>/*`:
 
@@ -39,61 +48,70 @@ git branch --list "{BRANCH_PREFIX}<project-name>/*"
 ```
 
 For each branch found:
-1. Check if it has commits ahead of main: `git log main..<branch> --oneline`
+1. Check if it has commits ahead of `origin/main`: `git log origin/main..<branch> --oneline`
 2. Check if it has a corresponding worktree directory: `git worktree list`
 
-Build a merge candidates table:
+Build a land candidates table:
 
 | Branch | Category | Commits Ahead | Has Worktree | Status |
 |--------|----------|---------------|-------------|--------|
 | `{BRANCH_PREFIX}<project>/<cat>` | `<cat>` | N | Yes/No | Ready/Active/Empty |
 
-- **Ready** = commits ahead of main, no active worktree (work is done, worktree was cleaned up or kept)
-- **Active** = commits ahead of main, worktree still exists (work may be in progress)
-- **Empty** = no commits ahead of main (nothing to merge)
+- **Ready** = commits ahead of `origin/main`, no active worktree (work is done, worktree was cleaned up or kept)
+- **Active** = commits ahead of `origin/main`, worktree still exists (work may be in progress)
+- **Empty** = no commits ahead of `origin/main` (nothing to land)
 
 If `<category-slug>` was provided, filter to only that branch.
 
 If no Ready branches exist, report the state and stop.
 
-### Step 2: Determine Merge Order
+### Step 2: Determine Land Order
 
-Read `TOPOLOGY-CLAUDE.md` for the `Parallel Groups` section and `Recommended Category Execution Order`.
+Read `TOPOLOGY-CLAUDE.md` for the `Parallel Groups` section and `Recommended Category Execution Order`. Also consult the live coordination registry (`{DOCS_ROOT}/coordination/IN-FLIGHT.md` or equivalent) — if any branch claims a shared file also claimed by another in-flight feature, honor that registry's `Merge order` so PRs serialize on shared files.
 
-Merge branches in dependency order:
+{{#if MULTI_AGENT}}
+Refresh the coordination registry (via your team's status/report command, if any) before landing begins, and update it after each PR merges to unblock waiting branches.
+{{/if}}
+
+Land branches (open + merge PRs) in dependency order:
 1. Phase 1 categories before Phase 2
 2. Phase 2 before Phase 3
-3. Within a phase/parallel group, merge in the order listed in the execution order
+3. Within a phase/parallel group, land in the order listed in the execution order
 
-This prevents merge conflicts from dependent changes landing out of order.
+This prevents conflicts from dependent changes landing out of order. Each later PR rebases on `origin/main` after the prior one merges (PRINCIPLES § Git & PR coordination, rule 6).
 
-### Step 3: Pre-Merge Verification
+### Step 3: Pre-Land Verification
 
-Before merging each branch, verify the main branch is clean:
+Before landing each branch, verify the local working tree is clean and `main` is synced:
 
 ```bash
 git status --porcelain
+git fetch origin && git rev-list --count origin/main..main   # must be 0
 ```
 
 If there are uncommitted changes, stop and report:
 
-> Main branch has uncommitted changes. Commit or stash them before merging.
+> Working tree has uncommitted changes. Commit or stash them before landing.
 
-### Step 4: Merge Each Branch Sequentially
+If local `main` is ahead of `origin/main` (count > 0), stop and report:
+
+> Local main has drifted from origin/main. Reconcile per PRINCIPLES § Git & PR coordination (rule 3) before landing — feature work must not sit on local main.
+
+### Step 4: Land Each Branch via PR Sequentially
 
 For each Ready branch (in dependency order):
 
-#### 4a: Preview the merge
+#### 4a: Preview the change
 
 ```bash
-git log main..<branch> --oneline --no-decorate
-git diff main...<branch> --stat
+git log origin/main..<branch> --oneline --no-decorate
+git diff origin/main...<branch> --stat
 ```
 
 Report the preview to the user:
 
 ```
-### Merging: <category-slug>
+### Landing: <category-slug>
 **Branch:** {BRANCH_PREFIX}<project>/<category>
 **Commits:** <N>
 **Files changed:** <N>
@@ -102,58 +120,85 @@ Report the preview to the user:
 <diffstat>
 ```
 
-#### 4b: Attempt the merge
+#### 4b: Rebase the branch on fresh origin/main + resolve shared-file conflicts
+
+Ensure the branch sits cleanly on the latest `origin/main` before opening the PR:
 
 ```bash
-git merge <branch> --no-ff -m "refactor(<scope>): merge <category-slug> topology worktree
-
-Merges {BRANCH_PREFIX}<project>/<category> branch containing <N> commits
-for the <category-slug> category of the <project-name> topology project.
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+git fetch origin
+git -C <worktree-path> rebase origin/main   # or: git checkout <branch> && git rebase origin/main
 ```
 
-Use `--no-ff` to preserve the branch history as a merge commit.
+If the rebase conflicts:
+1. Report the conflicting files.
+2. **Shared-file conflicts are expected and resolvable** — for registration/append-style files (shared files declared in the coordination registry such as server registration files, manifest files, or route/navigation barrels), the correct resolution is **keep-both**: retain BOTH this branch's registration AND the one already on `origin/main`. Never drop a sibling feature's registration to make the rebase pass.
+3. For semantic conflicts (same line, genuinely divergent logic), stop and ask the user how to proceed. Do NOT silently pick a side.
 
-If the merge has conflicts:
-1. Report the conflicting files
-2. Stop and ask the user how to proceed (resolve manually, abort, skip this branch)
-3. Do NOT attempt automatic conflict resolution
+> **Never resolve a conflict by `git merge`-ing the branch into local `main`.** Conflicts are resolved on the feature branch via rebase; local `main` stays a read-only mirror of `origin/main`.
 
-#### 4c: Post-merge build verification
+#### 4c: Build + test verification (on the branch, pre-push)
 
-After each successful merge:
+Run verification on the rebased branch before pushing:
 
 ```bash
 {BUILD_COMMAND}
-```
-
-If build fails:
-1. Report the build errors
-2. Stop — do not proceed to the next branch
-3. Suggest: fix the build error, commit the fix, then re-run topology-merge for remaining branches
-
-#### 4d: Post-merge test verification
-
-```bash
 {TEST_COMMAND}
 ```
 
-If tests fail:
-1. Report failing tests
-2. Stop — do not proceed to the next branch
-3. Suggest: fix the failing tests, commit the fix, then re-run topology-merge
+If build or tests fail:
+1. Report the errors.
+2. Stop — do not push or open a PR for this branch.
+3. Suggest: fix on the branch, commit, then re-run topology-merge for remaining branches.
 
-#### 4e: Clean up the branch
-
-After successful merge + build + test, clean up the worktree (if it exists) and delete the branch:
+#### 4d: Push the branch and open a PR
 
 ```bash
+git push -u origin <branch>
+```
+
+Generate the PR body from the project's foundation docs — `CONTRACT-SHEET.md` (contracts honored), `DECISION-LOG.md` (DL entries made in scope), `VERIFICATION-TABLE.md` (verification state for this category) — plus the per-category `VERIFICATION-REPORT.md`. Then:
+
+```bash
+gh pr create \
+  --base main \
+  --head <branch> \
+  --title "<type>(<scope>): <category-slug> — <one-line summary>" \
+  --body "$(cat <<'EOF'
+## <category-slug> (project: <project-name>)
+
+### Scope
+<categories/seams advanced — from VERIFICATION-TABLE.md>
+
+### Contracts honored
+<from CONTRACT-SHEET.md>
+
+### Decisions made
+<DL-<NNN> entries from DECISION-LOG.md added in this scope>
+
+### Verification
+<state from VERIFICATION-TABLE.md row + VERIFICATION-REPORT.md summary>
+
+### Shared files touched
+<call out any shared-file edits + how conflicts were resolved (keep-both)>
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+EOF
+)"
+```
+
+Report the PR URL. PRs merge **on the remote host** in the land order from Step 2 — do not merge them locally.
+
+#### 4e: Clean up the branch (after the PR has merged)
+
+Only after the PR is merged, sync local `main` and clean up the worktree + branch:
+
+```bash
+git checkout main && git fetch origin && git reset --hard origin/main
 git worktree remove <worktree-path>  # if worktree exists
 git branch -d <branch>
 ```
 
-The worktree must be removed before the branch can be deleted (git prevents deleting a branch that a worktree references).
+The worktree must be removed before the branch can be deleted (git prevents deleting a branch that a worktree references). If the PR is still open (not yet merged), leave the worktree and branch in place and note it in the report.
 
 ### Step 5: Report Results
 
@@ -161,15 +206,15 @@ The worktree must be removed before the branch can be deleted (git prevents dele
 ## topology-merge Complete
 
 **Project:** <project-name>
-**Branches merged:** <N>
+**PRs opened:** <N>
 **Branches skipped:** <N> (Active/Empty)
 **Build status:** PASS
 **Test status:** PASS
 
-### Merged Categories
-| Category | Branch | Commits | Result |
-|----------|--------|---------|--------|
-| <cat> | {BRANCH_PREFIX}<project>/<cat> | N | Merged ✓ |
+### Landed Categories (PRs)
+| Category | Branch | Commits | PR | Result |
+|----------|--------|---------|----|--------|
+| <cat> | {BRANCH_PREFIX}<project>/<cat> | N | #<N> | PR open / Merged ✓ |
 
 ### Skipped
 | Category | Branch | Reason |
@@ -180,9 +225,11 @@ The worktree must be removed before the branch can be deleted (git prevents dele
 <list any topology branches that still exist, or "None">
 
 ### Next Steps
-<If all categories merged:>
-All topology worktree branches for <project> have been merged.
-Run: /topology-integrate <project-name>
+<If all PRs opened/merged:>
+All topology worktree branches for <project> have been landed via PR.
+Merge the PRs in the land order above, then sync local main
+(git checkout main && git fetch && git reset --hard origin/main) and run:
+  /topology-integrate <project-name>
 
 <If some branches remain:>
 <N> branches remain. Re-run topology-merge after those categories complete.
@@ -192,10 +239,12 @@ Run: /topology-integrate <project-name>
 
 ## Important Notes
 
-- **Sequential merges are intentional** — merging one at a time with build+test between each catches integration issues at the earliest possible point. Do not batch merges.
-- **Never merge Active worktrees** — if a worktree still exists and has commits, the agent may still be working. Skip it and report.
-- **Conflict resolution is manual** — topology-merge does not attempt automatic conflict resolution. Conflicts in a topology project likely indicate a seam contract violation that needs human judgment.
-- **Branch naming convention** — all topology worktree branches use the pattern `{BRANCH_PREFIX}<project-name>/<category-slug>`. This convention is set by topology-implement when creating worktrees.
-- **No force operations** — topology-merge never force-deletes branches or discards changes. It only deletes branches that have been fully merged.
+- **NEVER `git merge` into local `main`.** Landing is via GitHub PR off fresh `origin/main`. Local `main` is a read-only mirror of `origin/main` — the only thing that reaches it is a PR merged on the remote host, pulled down via `git reset --hard origin/main`. This is PRINCIPLES § Git & PR coordination (rules 2 + 5), authored after a multi-session local-`main` divergence tangle.
+- **Sequential landing is intentional** — opening + merging one PR at a time, with build+test on each rebased branch, catches integration issues at the earliest possible point and lets each later PR rebase on the prior merge. Do not batch.
+- **Never land Active worktrees** — if a worktree still exists and the agent may still be working, skip it and report.
+- **Shared-file conflicts are keep-both** — for append/registration-style shared files declared in the coordination registry, resolve rebase conflicts by retaining BOTH registrations. Genuinely divergent same-line logic is the only case that needs human judgment.
+- **Branch naming convention** — all topology worktree branches use the pattern `{BRANCH_PREFIX}<project-name>/<category-slug>`. This convention is set by topology-implement when creating worktrees off `origin/main`.
+- **No force operations on `main`** — topology-merge never force-pushes or merges into local `main`. It only force-resets local `main` to match `origin/main` after a PR merges, and deletes branches whose PR has merged.
+- **No Workflow script needed** — this command is pure git/PR mechanics. The orchestration commands (`topology-sprint`, `topology-dispatch`, `topology-autopilot`) invoke it as a sub-step after verification gates pass; it does not itself fan out agents.
 
 $ARGUMENTS
