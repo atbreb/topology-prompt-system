@@ -328,3 +328,13 @@ Extracted and generalized from the topology + compass prompt systems that drove 
 production multi-app platform. The methodology — contracts/seams/decisions/categories, the five
 failure modes, append-only foundation docs, bilateral seams, the implementer pre-flight loadout —
 is preserved here verbatim; only the environment bindings were made portable.
+
+### Freeplay — lightweight topology-aware tasks
+
+```
+freeplay          Execute a task with topology context (fix, enhance, explore, refactor, audit, repair, research)
+freeplay-log      View freeplay session history — what was touched, what decisions were made
+freeplay-promote  Graduate a freeplay task into a full topology project
+```
+
+Freeplay is topology's "light mode." For work that doesn't warrant a full project but still touches contracts, seams, and decisions. The commands load relevant topology context before executing, surface guard rails (verified area regressions, seam bilateral checks, decision constraints), and record a lightweight trail in FREEPLAY-LOG.md. If a task grows in scope, `/freeplay-promote` bootstraps it into a full `/topology-discovery` → `/topology-init` pipeline.
