@@ -131,6 +131,32 @@ cd ~/Projects/topology-prompt-system && git pull
 /topology-update                          # recompiles + applies one-time updates
 ```
 
+### NL Routing Layer (optional, ~55-60 min)
+
+After `/topology-install` completes, you can set up natural-language routing so you never need to memorize command names. The system learns how YOU talk about your work and routes your casual language to the right command.
+
+```
+# Phase A — already done by /topology-install (technical scan)
+# Phase B — NL interview (~35-40 min)
+node .claude/scripts/interview/nl-interview.js --phase 1   # automated domain scan
+node .claude/scripts/interview/nl-interview.js --phase 2   # command coverage scenarios
+node .claude/scripts/interview/nl-interview.js --phase 3   # frustration ladder
+node .claude/scripts/interview/nl-interview.js --phase 4   # edge cases
+node .claude/scripts/interview/nl-interview.js --phase 5   # correction sweep
+
+# Phase C — compile your intent map
+node .claude/scripts/intent-map/compile-intent-map.js --input <interview-output.json>
+
+# Activation — add to .claude/settings.local.json:
+# "hooks": { "UserPromptSubmit": [{ "matcher": "*", "hooks": [{
+#   "type": "command", "command": "node <project>/.claude/scripts/hooks/nl-router.js",
+#   "timeout": 5 }] }] }
+```
+
+After activation, typing "what does the HIL queue look like" routes to `/topology-gates`. Typing "audit everything" routes to a 7-step chain. Commands like `topology-promote` and `topology-autopilot` are denylisted — they require explicit invocation.
+
+The interview captures YOUR vocabulary. It's personal data — the intent map is stored at `~/.claude/topology/`, outside version control.
+
 ---
 
 ## The commands
@@ -162,6 +188,8 @@ topology-resume / topology-decide                              Pause/resume on h
 topology-status / topology-trace / topology-diagnose          Inspect, trace seams, diagnose
 topology-patch / topology-merge / topology-dispatch           Surgical fixes, worktree merges, dispatch
 topology-doc-walk / topology-next                             Batch-walk docs, pick the next move
+topology-eval                                                  Eval-gate skill changes (pass@k / pass^k)
+topology-self-audit                                            Maturity scorecard for the harness itself
 ```
 
 The system molds itself along two **independent** axes:
@@ -173,6 +201,13 @@ The system molds itself along two **independent** axes:
   autonomy. `student` (lessons by default, dial down on request) / `curious` (flags learnable
   moments, you pick what to go deep on) / `quiet-pro` (silent unless it infers you've hit a snag).
   Spec: `templates/protocols/TEACHING-STANCE-PROTOCOL.md`.
+
+Every command also carries a **Workflow-orchestration substrate** (v1.2.0+). When the Workflow
+tool is available, prose loops become deterministic, resumable Workflow scripts with typed
+structured output. Five patterns: pipeline-over-categories, worktree-isolated parallel fan-out,
+find→adversarial-refutation, multi-modal sweep→completeness-critic, and Workflow-per-group with
+main-loop HITL adjudication. Paused runs resume from a cached `runId` — completed stages are
+free. The prose-mode path is fully preserved for environments without the Workflow tool.
 
 Delegation to a secondary agent is *optional* — install solo and all of that prose compiles out
 cleanly. Parallel **subagent dispatch is auto-adopted**: if your project already defines
@@ -216,7 +251,7 @@ topology-prompt-system/
 │   ├── topology-install.md        ← the initiation prompt (scan + interview + compile)
 │   └── topology-update.md         ← the update engine (recompile + one-time semantic updates)
 ├── templates/
-│   ├── commands/                  ← 26 topology commands + 4 project-* execution helpers (+ topology-PRINCIPLES)
+│   ├── commands/                  ← 28 topology commands + 4 project-* execution helpers (+ topology-PRINCIPLES)
 │   ├── protocols/                 ← autonomy + dispatch protocol templates
 │   └── skeletons/                 ← empty seeded global + project-foundation doc templates
 ├── profile/
